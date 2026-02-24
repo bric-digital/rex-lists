@@ -1,23 +1,23 @@
 {
-    "name": "@bric/webmunk-lists",
+    "name": "@bric/rex-lists",
     "version": "0.0.1",
-    "description": "Webmunk module for domain list management (blocking, allowing, categorization) with IndexedDB storage.",
+    "description": "REX module for domain list management (blocking, allowing, categorization) with IndexedDB storage.",
     "keywords": [
         "extension",
-        "webmunk",
+        "rex",
         "lists",
         "blocking",
         "filtering"
     ],
     "author": "Behavioral Research Innovation Center",
     "type": "module",
-    "homepage": "https://github.com/bric-digital/webmunk-lists",
+    "homepage": "https://github.com/bric-digital/rex-lists",
     "bugs": {
-        "url": "https://github.com/bric-digital/webmunk-lists/issues"
+        "url": "https://github.com/bric-digital/rex-lists/issues"
     },
     "repository": {
         "type": "git",
-        "url": "git+https://github.com/bric-digital/webmunk-lists.git"
+        "url": "git+https://github.com/bric-digital/rex-lists.git"
     },
     "exports": {
         ".": "./src/list-utilities.mts"

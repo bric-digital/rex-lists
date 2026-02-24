@@ -8,13 +8,27 @@
 import psl from 'psl'
 
 // ============================================================================
+// Debug Configuration
+// ============================================================================
+
+let debugEnabled = false
+
+/**
+ * Enable or disable debug logging for list matching operations.
+ * When enabled, matchDomainAgainstList and matchesPattern will log details to the console.
+ */
+export function setDebug(enabled: boolean): void {
+  debugEnabled = enabled
+}
+
+// ============================================================================
 // Types and Interfaces
 // ============================================================================
 
 // Pattern types:
 // - domain: matches the registered domain (e.g., "google.com" matches "www.google.com")
 // - host: matches the exact hostname (subdomain included), e.g., "health.google.com" only
-export type PatternType = 'domain' | 'host' | 'exact_url' | 'host_path_prefix' | 'regex'
+export type PatternType = 'domain' | 'host' | 'subdomain_wildcard' | 'exact_url' | 'host_path_prefix' | 'regex'
 export type EntrySource = 'backend' | 'user' | 'generated'
 
 export interface ListEntry {
@@ -518,6 +532,11 @@ export async function findListEntryByPattern(
 export async function matchDomainAgainstList(url: string, listName: string): Promise<ListEntry | null> {
   const entries = await getListEntries(listName)
 
+  if (debugEnabled) {
+    console.log(`[webmunk-lists] matchDomainAgainstList`)
+    console.log(entries)
+  }
+
   for (const entry of entries) {
     if (matchesPattern(url, entry.domain, entry.pattern_type)) {
       return entry
@@ -908,6 +927,10 @@ export function matchesPattern(url: string, pattern: string, patternType: Patter
     const urlObj = new URL(url)
     const hostname = urlObj.hostname
 
+    if (debugEnabled) {
+      console.log(`[webmunk-lists] matchesPattern("${url}", "${pattern}", "${patternType}")`)
+    }
+
     switch (patternType) {
       case 'domain': {
         // Strict registered-domain match (eTLD+1).
@@ -928,6 +951,10 @@ export function matchesPattern(url: string, pattern: string, patternType: Patter
         return urlDomain === normalizeLeadingWww(pattern.trim())
       }
 
+      case 'subdomain_wildcard':
+        // Server-side alias for 'host'. The server stores this pattern type as 'subdomain_wildcard'
+        // (a legacy name), but behavior is identical to 'host': exact hostname match, www-normalized.
+        // Falls through intentionally.
       case 'host': {
         // Match exact hostname (including subdomain).
         // Normalize an optional leading "www." to reduce surprises.
