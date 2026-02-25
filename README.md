@@ -1,10 +1,10 @@
-# webmunk-lists
+# rex-lists
 
-Core list storage and URL matching utilities for Webmunk browser extensions.
+Core list storage and URL matching utilities for REX browser extensions.
 
 ## Overview
 
-**webmunk-lists** provides:
+**rex-lists** provides:
 
 - IndexedDB-backed storage for domain/URL pattern lists
 - URL matching against multiple pattern types
@@ -114,7 +114,7 @@ The `lists` object contains named lists, where each list is an array of pattern 
 
 Lists are referenced by name in other module configurations:
 
-- **webmunk-history**: Uses `allow_lists`, `filter_lists`, `category_lists` to control what history is collected
+- **rex-history**: Uses `allow_lists`, `filter_lists`, `category_lists` to control what history is collected
 - **webmunk-lists-front-end**: Displays and manages list entries
 
 ### Entry Sources
@@ -142,7 +142,7 @@ Add to your extension's `package.json` dependencies:
 ```json
 {
   "dependencies": {
-    "@bric/webmunk-lists": "github:bric-digital/webmunk-lists#main"
+    "@bric/rex-lists": "github:bric-digital/rex-lists#main"
   }
 }
 ```
@@ -152,7 +152,7 @@ Then run `npm install`.
 ## API
 
 ```typescript
-import { matchUrl, getListEntries, addEntry } from '@bric/webmunk-lists'
+import { matchUrl, getListEntries, addEntry } from '@bric/rex-lists'
 
 // Check if URL matches any entry in a list
 const match = await matchUrl('https://www.google.com/search?q=test', 'serp')

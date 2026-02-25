@@ -1,8 +1,8 @@
 /**
- * List Utilities for Webmunk
+ * List Utilities for REX
  *
  * Provides IndexedDB-based domain list management for blocking, allowing,
- * and categorization across webmunk modules.
+ * and categorization across REX modules.
  */
 
 import psl from 'psl'
@@ -533,7 +533,7 @@ export async function matchDomainAgainstList(url: string, listName: string): Pro
   const entries = await getListEntries(listName)
 
   if (debugEnabled) {
-    console.log(`[webmunk-lists] matchDomainAgainstList`)
+    console.log(`[rex-lists] matchDomainAgainstList`)
     console.log(entries)
   }
 
@@ -928,7 +928,7 @@ export function matchesPattern(url: string, pattern: string, patternType: Patter
     const hostname = urlObj.hostname
 
     if (debugEnabled) {
-      console.log(`[webmunk-lists] matchesPattern("${url}", "${pattern}", "${patternType}")`)
+      console.log(`[rex-lists] matchesPattern("${url}", "${pattern}", "${patternType}")`)
     }
 
     switch (patternType) {

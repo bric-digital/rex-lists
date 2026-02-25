@@ -1,6 +1,6 @@
-# Webmunk List Utilities Test Suite
+# REX List Utilities Test Suite
 
-Comprehensive automated and manual tests for the @bric/webmunk-lists module.
+Comprehensive automated and manual tests for the @bric/rex-lists module.
 
 ## Quick Start
 
