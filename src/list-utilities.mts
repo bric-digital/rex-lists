@@ -874,7 +874,7 @@ export async function mergeBackendList(listName: string, entries: any[]): Promis
 
   for (const entry of entries) {
     try {
-      const pattern = entry?.pattern
+      const pattern = entry?.pattern ?? entry?.domain
       const patternType = entry?.pattern_type as PatternType | undefined
       if (typeof pattern !== 'string' || pattern.length === 0) continue
       if (!patternType) continue
@@ -907,7 +907,7 @@ export async function mergeBackendList(listName: string, entries: any[]): Promis
   const newEntries: Omit<ListEntry, 'id'>[] = []
 
   for (const entry of entries) {
-    const pattern = entry?.pattern
+    const pattern = entry?.pattern ?? entry?.domain
     const patternType = entry?.pattern_type as PatternType | undefined
 
     if (typeof pattern !== 'string' || pattern.length === 0 || !patternType) {

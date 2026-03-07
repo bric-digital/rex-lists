@@ -10532,7 +10532,7 @@ async function mergeBackendList(listName, entries) {
   const entriesToDelete = [];
   for (const entry of entries) {
     try {
-      const pattern = entry?.pattern;
+      const pattern = entry?.pattern ?? entry?.domain;
       const patternType = entry?.pattern_type;
       if (typeof pattern !== "string" || pattern.length === 0) continue;
       if (!patternType) continue;
@@ -10558,7 +10558,7 @@ async function mergeBackendList(listName, entries) {
   }
   const newEntries = [];
   for (const entry of entries) {
-    const pattern = entry?.pattern;
+    const pattern = entry?.pattern ?? entry?.domain;
     const patternType = entry?.pattern_type;
     if (typeof pattern !== "string" || pattern.length === 0 || !patternType) {
       console.warn(`[list-utilities] Skipping invalid backend list entry (missing pattern/pattern_type) for ${listName}:`, entry);
