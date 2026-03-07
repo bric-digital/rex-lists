@@ -31,16 +31,16 @@ test.describe('List Utilities - Database Initialization', () => {
 
       return {
         hasListNameIndex: store.indexNames.contains('list_name'),
-        hasDomainIndex: store.indexNames.contains('domain'),
-        hasCompoundIndex: store.indexNames.contains('list_name_domain'),
-        hasUniquePatternIndex: store.indexNames.contains('list_name_pattern_type_domain'),
+        hasPatternIndex: store.indexNames.contains('pattern'),
+        hasCompoundIndex: store.indexNames.contains('list_name_pattern'),
+        hasUniquePatternIndex: store.indexNames.contains('list_name_pattern_type_pattern'),
         keyPath: store.keyPath,
         autoIncrement: store.autoIncrement
       };
     });
 
     expect(storeInfo.hasListNameIndex).toBe(true);
-    expect(storeInfo.hasDomainIndex).toBe(true);
+    expect(storeInfo.hasPatternIndex).toBe(true);
     expect(storeInfo.hasCompoundIndex).toBe(true);
     expect(storeInfo.hasUniquePatternIndex).toBe(true);
     expect(storeInfo.keyPath).toBe('id');
@@ -60,7 +60,7 @@ test.describe('List Utilities - CRUD Operations', () => {
     const entryId = await page.evaluate(async () => {
       return await window.ListUtilities.createListEntry({
         list_name: 'test-list',
-        domain: 'example.com',
+        pattern: 'example.com',
         pattern_type: 'domain',
         metadata: {
           category: 'test',
@@ -77,13 +77,13 @@ test.describe('List Utilities - CRUD Operations', () => {
     await page.evaluate(async () => {
       await window.ListUtilities.createListEntry({
         list_name: 'test-list',
-        domain: 'example.com',
+        pattern: 'example.com',
         pattern_type: 'domain',
         metadata: { category: 'test' }
       });
       await window.ListUtilities.createListEntry({
         list_name: 'test-list',
-        domain: 'test.com',
+        pattern: 'test.com',
         pattern_type: 'domain',
         metadata: { category: 'test' }
       });
@@ -94,7 +94,7 @@ test.describe('List Utilities - CRUD Operations', () => {
     });
 
     expect(entries).toHaveLength(2);
-    expect(entries[0].domain).toBeTruthy();
+    expect(entries[0].pattern).toBeTruthy();
     expect(entries[0].metadata.created_at).toBeTruthy();
     expect(entries[0].metadata.updated_at).toBeTruthy();
   });
@@ -103,7 +103,7 @@ test.describe('List Utilities - CRUD Operations', () => {
     const result = await page.evaluate(async () => {
       const id = await window.ListUtilities.createListEntry({
         list_name: 'test-list',
-        domain: 'example.com',
+        pattern: 'example.com',
         pattern_type: 'domain',
         metadata: { category: 'original' }
       });
@@ -124,7 +124,7 @@ test.describe('List Utilities - CRUD Operations', () => {
     const entriesCount = await page.evaluate(async () => {
       const id = await window.ListUtilities.createListEntry({
         list_name: 'test-list',
-        domain: 'example.com',
+        pattern: 'example.com',
         pattern_type: 'domain',
         metadata: {}
       });
@@ -142,19 +142,19 @@ test.describe('List Utilities - CRUD Operations', () => {
       // Create multiple entries
       await window.ListUtilities.createListEntry({
         list_name: 'test-list',
-        domain: 'example1.com',
+        pattern: 'example1.com',
         pattern_type: 'domain',
         metadata: {}
       });
       await window.ListUtilities.createListEntry({
         list_name: 'test-list',
-        domain: 'example2.com',
+        pattern: 'example2.com',
         pattern_type: 'domain',
         metadata: {}
       });
       await window.ListUtilities.createListEntry({
         list_name: 'other-list',
-        domain: 'other.com',
+        pattern: 'other.com',
         pattern_type: 'domain',
         metadata: {}
       });
@@ -184,7 +184,7 @@ test.describe('List Utilities - Query Operations', () => {
     const found = await page.evaluate(async () => {
       await window.ListUtilities.createListEntry({
         list_name: 'test-list',
-        domain: 'example.com',
+        pattern: 'example.com',
         pattern_type: 'domain',
         metadata: { category: 'findme' }
       });
@@ -193,7 +193,7 @@ test.describe('List Utilities - Query Operations', () => {
     });
 
     expect(found).toBeTruthy();
-    expect(found.domain).toBe('example.com');
+    expect(found.pattern).toBe('example.com');
     expect(found.metadata.category).toBe('findme');
   });
 
@@ -209,7 +209,7 @@ test.describe('List Utilities - Query Operations', () => {
     const match = await page.evaluate(async () => {
       await window.ListUtilities.createListEntry({
         list_name: 'blocked-sites',
-        domain: 'example.com',
+        pattern: 'example.com',
         pattern_type: 'domain',
         metadata: { category: 'blocked' }
       });
@@ -221,26 +221,26 @@ test.describe('List Utilities - Query Operations', () => {
     });
 
     expect(match).toBeTruthy();
-    expect(match.domain).toBe('example.com');
+    expect(match.pattern).toBe('example.com');
   });
 
   test('should get all unique list names', async ({ page }) => {
     const lists = await page.evaluate(async () => {
       await window.ListUtilities.createListEntry({
         list_name: 'list-a',
-        domain: 'a.com',
+        pattern: 'a.com',
         pattern_type: 'domain',
         metadata: {}
       });
       await window.ListUtilities.createListEntry({
         list_name: 'list-b',
-        domain: 'b.com',
+        pattern: 'b.com',
         pattern_type: 'domain',
         metadata: {}
       });
       await window.ListUtilities.createListEntry({
         list_name: 'list-a',
-        domain: 'a2.com',
+        pattern: 'a2.com',
         pattern_type: 'domain',
         metadata: {}
       });
@@ -254,78 +254,472 @@ test.describe('List Utilities - Query Operations', () => {
   });
 });
 
-test.describe('List Utilities - Pattern Matching', () => {
+test.describe('List Utilities - Pattern Matching: domain', () => {
   test.beforeEach(async ({ page }) => {
     await page.goto('/test-page.html');
     await page.waitForFunction(() => window.testUtilitiesReady === true);
   });
 
-  test('should match domain pattern correctly', async ({ page }) => {
-    const results = await page.evaluate(() => {
-      return {
-        exactMatch: window.ListUtilities.matchesPattern('https://google.com', 'google.com', 'domain'),
-        wwwMatch: window.ListUtilities.matchesPattern('https://www.google.com', 'google.com', 'domain'),
-        subdomainMatch: window.ListUtilities.matchesPattern('https://mail.google.com', 'google.com', 'domain'),
-        noMatch: window.ListUtilities.matchesPattern('https://facebook.com', 'google.com', 'domain')
-      };
-    });
+  // Pattern: 'bric.digital'
+  // Matches the registered domain (eTLD+1) regardless of subdomain or path.
 
-    expect(results.exactMatch).toBe(true);
-    expect(results.wwwMatch).toBe(true);
-    expect(results.subdomainMatch).toBe(true);
-    expect(results.noMatch).toBe(false);
+  test('matches the bare registered domain', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital', 'bric.digital', 'domain')
+    );
+    expect(result).toBe(true);
   });
 
-  test('should match subdomain wildcard pattern', async ({ page }) => {
-    const results = await page.evaluate(() => {
-      return {
-        exactMatch: window.ListUtilities.matchesPattern('https://google.com', '^https?://([a-z0-9-]+\\.)*google\\.com(/|$)', 'regex'),
-        subdomainMatch: window.ListUtilities.matchesPattern('https://mail.google.com', '^https?://([a-z0-9-]+\\.)*google\\.com(/|$)', 'regex'),
-        noMatch: window.ListUtilities.matchesPattern('https://facebook.com', '^https?://([a-z0-9-]+\\.)*google\\.com(/|$)', 'regex')
-      };
-    });
-
-    expect(results.exactMatch).toBe(true);
-    expect(results.subdomainMatch).toBe(true);
-    expect(results.noMatch).toBe(false);
+  test('matches with www prefix on the URL', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://www.bric.digital', 'bric.digital', 'domain')
+    );
+    expect(result).toBe(true);
   });
 
-  test('should match exact URL pattern', async ({ page }) => {
-    const results = await page.evaluate(() => {
-      return {
-        exactMatch: window.ListUtilities.matchesPattern('https://example.com/test', 'https://example.com/test', 'exact_url'),
-        noMatch: window.ListUtilities.matchesPattern('https://example.com/other', 'https://example.com/test', 'exact_url')
-      };
-    });
-
-    expect(results.exactMatch).toBe(true);
-    expect(results.noMatch).toBe(false);
+  test('matches a subdomain of the registered domain', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://ssm.bric.digital/path', 'bric.digital', 'domain')
+    );
+    expect(result).toBe(true);
   });
 
-  test('should match regex pattern', async ({ page }) => {
-    const results = await page.evaluate(() => {
-      return {
-        match1: window.ListUtilities.matchesPattern('https://test.example.com', '.*\\.example\\.com', 'regex'),
-        match2: window.ListUtilities.matchesPattern('https://example.com/admin', '.*/admin', 'regex'),
-        noMatch: window.ListUtilities.matchesPattern('https://other.com', '.*\\.example\\.com', 'regex')
-      };
-    });
-
-    expect(results.match1).toBe(true);
-    expect(results.match2).toBe(true);
-    expect(results.noMatch).toBe(false);
+  test('matches a deep subdomain of the registered domain', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://a.b.bric.digital/', 'bric.digital', 'domain')
+    );
+    expect(result).toBe(true);
   });
 
-  test('should handle complex TLDs correctly', async ({ page }) => {
-    const results = await page.evaluate(() => {
-      return {
-        coUk: window.ListUtilities.matchesPattern('https://www.example.co.uk', 'example.co.uk', 'domain'),
-        comAu: window.ListUtilities.matchesPattern('https://www.example.com.au', 'example.com.au', 'domain')
-      };
-    });
+  test('does not match a different registered domain', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://notbric.digital', 'bric.digital', 'domain')
+    );
+    expect(result).toBe(false);
+  });
 
-    expect(results.coUk).toBe(true);
-    expect(results.comAu).toBe(true);
+  test('does not match a domain that merely contains the pattern as a substring', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://mybric.digital', 'bric.digital', 'domain')
+    );
+    expect(result).toBe(false);
+  });
+
+  test('rejects a subdomain used as a domain pattern (safety guard)', async ({ page }) => {
+    // 'ssm.bric.digital' is not a registered domain (eTLD+1), so pattern_type:'domain' must not match
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://ssm.bric.digital', 'ssm.bric.digital', 'domain')
+    );
+    expect(result).toBe(false);
+  });
+
+  test('handles complex TLDs (co.uk)', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://www.bbc.co.uk/news', 'bbc.co.uk', 'domain')
+    );
+    expect(result).toBe(true);
+  });
+});
+
+test.describe('List Utilities - Pattern Matching: host / subdomain_wildcard', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/test-page.html');
+    await page.waitForFunction(() => window.testUtilitiesReady === true);
+  });
+
+  // Pattern: 'ssm.bric.digital'
+  // Matches only that exact hostname (normalizing leading www).
+  // 'host' and 'subdomain_wildcard' are aliases — both tested below.
+
+  test('host: matches the exact subdomain hostname', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://ssm.bric.digital/page', 'ssm.bric.digital', 'host')
+    );
+    expect(result).toBe(true);
+  });
+
+  test('host: does not match the parent registered domain', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital', 'ssm.bric.digital', 'host')
+    );
+    expect(result).toBe(false);
+  });
+
+  test('host: does not match a sibling subdomain', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://other.bric.digital', 'ssm.bric.digital', 'host')
+    );
+    expect(result).toBe(false);
+  });
+
+  test('host: normalizes www on the URL side', async ({ page }) => {
+    // www.ssm.bric.digital -> strips www -> ssm.bric.digital (matches)
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://www.ssm.bric.digital/', 'ssm.bric.digital', 'host')
+    );
+    expect(result).toBe(true);
+  });
+
+  test('subdomain_wildcard: matches the exact hostname', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://ssm.bric.digital/data', 'ssm.bric.digital', 'subdomain_wildcard')
+    );
+    expect(result).toBe(true);
+  });
+
+  test('subdomain_wildcard: does not match parent domain', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital', 'ssm.bric.digital', 'subdomain_wildcard')
+    );
+    expect(result).toBe(false);
+  });
+});
+
+test.describe('List Utilities - Pattern Matching: exact_url', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/test-page.html');
+    await page.waitForFunction(() => window.testUtilitiesReady === true);
+  });
+
+  // Pattern: 'https://bric.digital/'
+  // Must be character-for-character identical.
+
+  test('matches the exact URL', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital/', 'https://bric.digital/', 'exact_url')
+    );
+    expect(result).toBe(true);
+  });
+
+  test('does not match the same URL without trailing slash', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital', 'https://bric.digital/', 'exact_url')
+    );
+    expect(result).toBe(false);
+  });
+
+  test('does not match a URL with an extra path', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital/about', 'https://bric.digital/', 'exact_url')
+    );
+    expect(result).toBe(false);
+  });
+
+  test('does not match a different scheme', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('http://bric.digital/', 'https://bric.digital/', 'exact_url')
+    );
+    expect(result).toBe(false);
+  });
+});
+
+test.describe('List Utilities - Pattern Matching: host_path_prefix', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/test-page.html');
+    await page.waitForFunction(() => window.testUtilitiesReady === true);
+  });
+
+  // Pattern: 'bric.digital/about'
+  // Matches any URL whose host is bric.digital and whose path starts with /about.
+
+  test('matches a URL whose path starts with the prefix', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital/about', 'bric.digital/about', 'host_path_prefix')
+    );
+    expect(result).toBe(true);
+  });
+
+  test('matches a URL with additional path segments after the prefix', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital/about/team', 'bric.digital/about', 'host_path_prefix')
+    );
+    expect(result).toBe(true);
+  });
+
+  test('matches when the pattern is given as a full URL', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern(
+        'https://bric.digital/about/team',
+        'https://bric.digital/about',
+        'host_path_prefix'
+      )
+    );
+    expect(result).toBe(true);
+  });
+
+  test('does not match a URL on a different path', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital/contact', 'bric.digital/about', 'host_path_prefix')
+    );
+    expect(result).toBe(false);
+  });
+
+  test('does not match a different host', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://other.digital/about', 'bric.digital/about', 'host_path_prefix')
+    );
+    expect(result).toBe(false);
+  });
+
+  test('normalizes www on the URL host', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://www.bric.digital/about/us', 'bric.digital/about', 'host_path_prefix')
+    );
+    expect(result).toBe(true);
+  });
+
+  test('pattern without a path component does not match', async ({ page }) => {
+    // host_path_prefix requires a "/" — a bare hostname is not a valid prefix pattern
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital/about', 'bric.digital', 'host_path_prefix')
+    );
+    expect(result).toBe(false);
+  });
+});
+
+test.describe('List Utilities - Pattern Matching: regex', () => {
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/test-page.html');
+    await page.waitForFunction(() => window.testUtilitiesReady === true);
+  });
+
+  // Pattern: '.*ric\\.dig.*'
+  // Tests against the full URL string.
+
+  test('matches a URL that satisfies the regex', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital/page', '.*ric\\.dig.*', 'regex')
+    );
+    expect(result).toBe(true);
+  });
+
+  test('matches a subdomain URL that satisfies the regex', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://ssm.bric.digital/', '.*ric\\.dig.*', 'regex')
+    );
+    expect(result).toBe(true);
+  });
+
+  test('does not match a URL that does not satisfy the regex', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://example.com/', '.*ric\\.dig.*', 'regex')
+    );
+    expect(result).toBe(false);
+  });
+
+  test('anchored regex only matches at the intended position', async ({ page }) => {
+    const match = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital/', '^https://bric\\.digital/', 'regex')
+    );
+    const noMatch = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('http://bric.digital/', '^https://bric\\.digital/', 'regex')
+    );
+    expect(match).toBe(true);
+    expect(noMatch).toBe(false);
+  });
+
+  test('handles an invalid regex gracefully (returns false, does not throw)', async ({ page }) => {
+    const result = await page.evaluate(() =>
+      window.ListUtilities.matchesPattern('https://bric.digital/', '[invalid(regex', 'regex')
+    );
+    expect(result).toBe(false);
+  });
+});
+
+test.describe('List Utilities - matchDomainAgainstList end-to-end', () => {
+  // These tests go through the full pipeline: insert an entry into IndexedDB,
+  // then call matchDomainAgainstList and assert on the returned ListEntry.
+  // This verifies that pattern matching works correctly in the real DB roundtrip,
+  // not just as a unit call to matchesPattern.
+
+  test.beforeEach(async ({ page }) => {
+    await page.goto('/test-page.html');
+    await page.waitForFunction(() => window.testUtilitiesReady === true);
+    await page.evaluate(() => window.clearDatabase());
+    await page.waitForTimeout(100);
+  });
+
+  test('domain pattern: URL with subdomain matches registered domain entry', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: 'bric.digital',
+        pattern_type: 'domain',
+        source: 'backend',
+        metadata: { category: 'tech' }
+      });
+      return await window.ListUtilities.matchDomainAgainstList(
+        'https://ssm.bric.digital/dashboard',
+        'e2e-list'
+      );
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern).toBe('bric.digital');
+    expect(match.pattern_type).toBe('domain');
+    expect(match.metadata.category).toBe('tech');
+  });
+
+  test('domain pattern: unrelated domain does not match', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: 'bric.digital',
+        pattern_type: 'domain',
+        source: 'backend',
+        metadata: {}
+      });
+      return await window.ListUtilities.matchDomainAgainstList('https://example.com/', 'e2e-list');
+    });
+    expect(match).toBeNull();
+  });
+
+  test('host pattern: exact subdomain hostname matches', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: 'ssm.bric.digital',
+        pattern_type: 'host',
+        source: 'backend',
+        metadata: {}
+      });
+      return await window.ListUtilities.matchDomainAgainstList(
+        'https://ssm.bric.digital/page',
+        'e2e-list'
+      );
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern_type).toBe('host');
+  });
+
+  test('host pattern: parent domain does not match', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: 'ssm.bric.digital',
+        pattern_type: 'host',
+        source: 'backend',
+        metadata: {}
+      });
+      return await window.ListUtilities.matchDomainAgainstList('https://bric.digital/', 'e2e-list');
+    });
+    expect(match).toBeNull();
+  });
+
+  test('exact_url pattern: matches only the exact URL', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: 'https://bric.digital/',
+        pattern_type: 'exact_url',
+        source: 'backend',
+        metadata: {}
+      });
+      return await window.ListUtilities.matchDomainAgainstList('https://bric.digital/', 'e2e-list');
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern_type).toBe('exact_url');
+  });
+
+  test('exact_url pattern: URL with extra path does not match', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: 'https://bric.digital/',
+        pattern_type: 'exact_url',
+        source: 'backend',
+        metadata: {}
+      });
+      return await window.ListUtilities.matchDomainAgainstList('https://bric.digital/extra', 'e2e-list');
+    });
+    expect(match).toBeNull();
+  });
+
+  test('host_path_prefix pattern: URL under the prefix matches', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: 'bric.digital/about',
+        pattern_type: 'host_path_prefix',
+        source: 'backend',
+        metadata: {}
+      });
+      return await window.ListUtilities.matchDomainAgainstList(
+        'https://bric.digital/about/team',
+        'e2e-list'
+      );
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern_type).toBe('host_path_prefix');
+  });
+
+  test('host_path_prefix pattern: URL on a different path does not match', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: 'bric.digital/about',
+        pattern_type: 'host_path_prefix',
+        source: 'backend',
+        metadata: {}
+      });
+      return await window.ListUtilities.matchDomainAgainstList(
+        'https://bric.digital/contact',
+        'e2e-list'
+      );
+    });
+    expect(match).toBeNull();
+  });
+
+  test('regex pattern: URL matching the pattern is found', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: '.*ric\\.dig.*',
+        pattern_type: 'regex',
+        source: 'backend',
+        metadata: { category: 'bric-sites' }
+      });
+      return await window.ListUtilities.matchDomainAgainstList(
+        'https://bric.digital/page',
+        'e2e-list'
+      );
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern_type).toBe('regex');
+    expect(match.metadata.category).toBe('bric-sites');
+  });
+
+  test('regex pattern: non-matching URL returns null', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.createListEntry({
+        list_name: 'e2e-list',
+        pattern: '.*ric\\.dig.*',
+        pattern_type: 'regex',
+        source: 'backend',
+        metadata: {}
+      });
+      return await window.ListUtilities.matchDomainAgainstList('https://example.com/', 'e2e-list');
+    });
+    expect(match).toBeNull();
+  });
+
+  test('returns null when the list does not exist', async ({ page }) => {
+    const match = await page.evaluate(async () =>
+      await window.ListUtilities.matchDomainAgainstList('https://bric.digital/', 'no-such-list')
+    );
+    expect(match).toBeNull();
+  });
+
+  test('returns the first matching entry when multiple entries are present', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      await window.ListUtilities.bulkCreateListEntries([
+        { list_name: 'e2e-list', pattern: 'example.com', pattern_type: 'domain', source: 'backend', metadata: { category: 'other' } },
+        { list_name: 'e2e-list', pattern: 'bric.digital', pattern_type: 'domain', source: 'backend', metadata: { category: 'tech' } }
+      ]);
+      return await window.ListUtilities.matchDomainAgainstList('https://bric.digital/', 'e2e-list');
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern).toBe('bric.digital');
+    expect(match.metadata.category).toBe('tech');
   });
 });
 
@@ -340,9 +734,9 @@ test.describe('List Utilities - Bulk Operations', () => {
   test('should bulk create entries', async ({ page }) => {
     const result = await page.evaluate(async () => {
       const entries = [
-        { list_name: 'bulk-test', domain: 'site1.com', pattern_type: 'domain', metadata: {} },
-        { list_name: 'bulk-test', domain: 'site2.com', pattern_type: 'domain', metadata: {} },
-        { list_name: 'bulk-test', domain: 'site3.com', pattern_type: 'domain', metadata: {} }
+        { list_name: 'bulk-test', pattern: 'site1.com', pattern_type: 'domain', metadata: {} },
+        { list_name: 'bulk-test', pattern: 'site2.com', pattern_type: 'domain', metadata: {} },
+        { list_name: 'bulk-test', pattern: 'site3.com', pattern_type: 'domain', metadata: {} }
       ];
 
       const ids = await window.ListUtilities.bulkCreateListEntries(entries);
@@ -359,7 +753,7 @@ test.describe('List Utilities - Bulk Operations', () => {
     const exported = await page.evaluate(async () => {
       await window.ListUtilities.createListEntry({
         list_name: 'export-test',
-        domain: 'example.com',
+        pattern: 'example.com',
         pattern_type: 'domain',
         metadata: { category: 'test' }
       });
@@ -371,7 +765,7 @@ test.describe('List Utilities - Bulk Operations', () => {
     expect(data.list_name).toBe('export-test');
     expect(data.version).toBe(1);
     expect(data.entries).toHaveLength(1);
-    expect(data.entries[0].domain).toBe('example.com');
+    expect(data.entries[0].pattern).toBe('example.com');
     expect(data.exported_at).toBeTruthy();
   });
 
@@ -381,8 +775,8 @@ test.describe('List Utilities - Bulk Operations', () => {
         list_name: 'import-test',
         version: 1,
         entries: [
-          { domain: 'imported1.com', pattern_type: 'domain', metadata: { source: 'import' } },
-          { domain: 'imported2.com', pattern_type: 'domain', metadata: { source: 'import' } }
+          { pattern: 'imported1.com', pattern_type: 'domain', metadata: { source: 'import' } },
+          { pattern: 'imported2.com', pattern_type: 'domain', metadata: { source: 'import' } }
         ]
       };
 
@@ -402,7 +796,7 @@ test.describe('List Utilities - Bulk Operations', () => {
       // Create initial entries
       await window.ListUtilities.createListEntry({
         list_name: 'replace-test',
-        domain: 'old.com',
+        pattern: 'old.com',
         pattern_type: 'domain',
         metadata: {}
       });
@@ -412,18 +806,18 @@ test.describe('List Utilities - Bulk Operations', () => {
         list_name: 'replace-test',
         version: 1,
         entries: [
-          { domain: 'new.com', pattern_type: 'domain', metadata: {} }
+          { pattern: 'new.com', pattern_type: 'domain', metadata: {} }
         ]
       };
 
       await window.ListUtilities.importList('replace-test', JSON.stringify(importData));
       const entries = await window.ListUtilities.getListEntries('replace-test');
 
-      return { count: entries.length, domain: entries[0].domain };
+      return { count: entries.length, pattern: entries[0].pattern };
     });
 
     expect(result.count).toBe(1);
-    expect(result.domain).toBe('new.com');
+    expect(result.pattern).toBe('new.com');
   });
 });
 
@@ -440,13 +834,13 @@ test.describe('List Utilities - Error Handling', () => {
       try {
         await window.ListUtilities.createListEntry({
           list_name: 'dup-test',
-          domain: 'duplicate.com',
+          pattern: 'duplicate.com',
           pattern_type: 'domain',
           metadata: {}
         });
         await window.ListUtilities.createListEntry({
           list_name: 'dup-test',
-          domain: 'duplicate.com',
+          pattern: 'duplicate.com',
           pattern_type: 'domain',
           metadata: {}
         });
@@ -464,14 +858,14 @@ test.describe('List Utilities - Error Handling', () => {
     const result = await page.evaluate(async () => {
       await window.ListUtilities.createListEntry({
         list_name: 'mixed-patterns',
-        domain: 'example.com',
+        pattern: 'example.com',
         pattern_type: 'domain',
         metadata: {}
       });
 
       await window.ListUtilities.createListEntry({
         list_name: 'mixed-patterns',
-        domain: 'example.com',
+        pattern: 'example.com',
         pattern_type: 'host',
         metadata: {}
       });
@@ -487,14 +881,14 @@ test.describe('List Utilities - Error Handling', () => {
     const count = await page.evaluate(async () => {
       await window.ListUtilities.createListEntry({
         list_name: 'regex-list',
-        domain: '.*(tiktok|snapchat).*',
+        pattern: '.*(tiktok|snapchat).*',
         pattern_type: 'regex',
         metadata: {}
       });
 
       await window.ListUtilities.createListEntry({
         list_name: 'regex-list',
-        domain: '^https?://([a-z0-9-]+\\\\.)*(porn|pron|xxx)(/|$)',
+        pattern: '^https?://([a-z0-9-]+\\\\.)*(porn|pron|xxx)(/|$)',
         pattern_type: 'regex',
         metadata: {}
       });
@@ -524,7 +918,7 @@ test.describe('List Utilities - Error Handling', () => {
   test('should handle update of non-existent entry', async ({ page }) => {
     const error = await page.evaluate(async () => {
       try {
-        await window.ListUtilities.updateListEntry(999999, { domain: 'new.com' });
+        await window.ListUtilities.updateListEntry(999999, { pattern: 'new.com' });
         return null;
       } catch (err) {
         return err.message;
@@ -550,7 +944,7 @@ test.describe('List Utilities - Performance', () => {
       for (let i = 0; i < 100; i++) {
         entries.push({
           list_name: 'perf-test',
-          domain: `domain${i}.com`,
+          pattern: `domain${i}.com`,
           pattern_type: 'domain',
           metadata: { index: i }
         });
@@ -573,7 +967,7 @@ test.describe('List Utilities - Performance', () => {
       for (let i = 0; i < 100; i++) {
         entries.push({
           list_name: 'retrieve-test',
-          domain: `domain${i}.com`,
+          pattern: `domain${i}.com`,
           pattern_type: 'domain',
           metadata: {}
         });

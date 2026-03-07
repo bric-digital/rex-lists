@@ -34,7 +34,7 @@ export type EntrySource = 'backend' | 'user' | 'generated'
 export interface ListEntry {
   id?: number
   list_name: string
-  domain: string
+  pattern: string
   pattern_type: PatternType
   source: EntrySource
   metadata: {
@@ -95,7 +95,11 @@ const DB_NAME = 'webmunk_lists'
 //
 // v3: force upgrade in case a previous v2 build existed with the old unique
 // list_name_domain index (Chrome won't rerun onupgradeneeded unless the version changes).
-const DB_VERSION = 3
+//
+// v4: rename the 'domain' record field to 'pattern' (domain was misleading — it holds
+// any pattern string, not just registered domains). Migrate existing records in-place and
+// rename the 'domain', 'list_name_domain', and 'list_name_pattern_type_domain' indexes.
+const DB_VERSION = 4
 const STORE_NAME = 'list_entries'
 
 // ============================================================================
@@ -135,12 +139,34 @@ export async function initializeListDatabase(): Promise<IDBDatabase> {
       if (!transaction) return
       const objectStore = transaction.objectStore(STORE_NAME)
 
+      // v4 migration: rename the stored 'domain' field to 'pattern' on all existing records.
+      // We open a cursor over the whole store and rewrite any record that still has 'domain'.
+      if ((event.oldVersion ?? 0) < 4) {
+        const cursorRequest = objectStore.openCursor()
+        cursorRequest.onsuccess = () => {
+          const cursor = cursorRequest.result
+          if (!cursor) return
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          const record = cursor.value as any
+          if ('domain' in record && !('pattern' in record)) {
+            record.pattern = record.domain
+            delete record.domain
+            cursor.update(record)
+          }
+          cursor.continue()
+        }
+      }
+
       // Basic indexes
       if (!objectStore.indexNames.contains('list_name')) {
         objectStore.createIndex('list_name', 'list_name', { unique: false })
       }
-      if (!objectStore.indexNames.contains('domain')) {
-        objectStore.createIndex('domain', 'domain', { unique: false })
+      // Remove old 'domain' index (renamed to 'pattern' in v4).
+      if (objectStore.indexNames.contains('domain')) {
+        objectStore.deleteIndex('domain')
+      }
+      if (!objectStore.indexNames.contains('pattern')) {
+        objectStore.createIndex('pattern', 'pattern', { unique: false })
       }
       if (!objectStore.indexNames.contains('source')) {
         objectStore.createIndex('source', 'source', { unique: false })
@@ -150,21 +176,25 @@ export async function initializeListDatabase(): Promise<IDBDatabase> {
       }
 
       // Compound indexes:
-      // - list_name_domain: non-unique helper index (legacy + convenience queries)
-      // - list_name_pattern_type_domain: unique index enforcing per-pattern uniqueness
+      // - list_name_pattern: non-unique helper index (convenience queries)
+      // - list_name_pattern_type_pattern: unique index enforcing per-pattern uniqueness
       if (objectStore.indexNames.contains('list_name_domain')) {
         objectStore.deleteIndex('list_name_domain')
       }
-      objectStore.createIndex('list_name_domain', ['list_name', 'domain'], { unique: false })
+      if (!objectStore.indexNames.contains('list_name_pattern')) {
+        objectStore.createIndex('list_name_pattern', ['list_name', 'pattern'], { unique: false })
+      }
 
       if (objectStore.indexNames.contains('list_name_pattern_type_domain')) {
         objectStore.deleteIndex('list_name_pattern_type_domain')
       }
-      objectStore.createIndex(
-        'list_name_pattern_type_domain',
-        ['list_name', 'pattern_type', 'domain'],
-        { unique: true }
-      )
+      if (!objectStore.indexNames.contains('list_name_pattern_type_pattern')) {
+        objectStore.createIndex(
+          'list_name_pattern_type_pattern',
+          ['list_name', 'pattern_type', 'pattern'],
+          { unique: true }
+        )
+      }
 
       console.log('[list-utilities] Ensured object store and indexes')
     }
@@ -190,9 +220,9 @@ async function getDatabase(): Promise<IDBDatabase> {
  * @throws Error if entry with same list_name and domain already exists
  */
 export async function createListEntry(entry: Omit<ListEntry, 'id'>): Promise<number> {
-  if (entry.pattern_type === 'domain' && !isStrictRegisteredDomain(entry.domain)) {
+  if (entry.pattern_type === 'domain' && !isStrictRegisteredDomain(entry.pattern)) {
     throw new Error(
-      `Invalid 'domain' pattern "${entry.domain}". ` +
+      `Invalid 'domain' pattern "${entry.pattern}". ` +
       `Use a registered domain like "google.com", or use pattern_type "host"/"regex" for subdomains.`
     )
   }
@@ -320,12 +350,12 @@ export async function updateListEntry(id: number, updates: Partial<ListEntry>): 
         return
       }
 
-      const nextDomain = updates.domain ?? entry.domain
+      const nextPattern = updates.pattern ?? entry.pattern
       const nextPatternType = updates.pattern_type ?? entry.pattern_type
-      if (nextPatternType === 'domain' && !isStrictRegisteredDomain(nextDomain)) {
+      if (nextPatternType === 'domain' && !isStrictRegisteredDomain(nextPattern)) {
         reject(
           new Error(
-            `Invalid 'domain' pattern "${nextDomain}". ` +
+            `Invalid 'domain' pattern "${nextPattern}". ` +
             `Use a registered domain like "google.com", or use pattern_type "host"/"regex" for subdomains.`
           )
         )
@@ -476,16 +506,16 @@ export async function resetListDatabase(): Promise<void> {
 // ============================================================================
 
 /**
- * Find a specific entry in a list by domain
+ * Find a specific entry in a list by pattern string
  */
-export async function findListEntry(listName: string, domain: string): Promise<ListEntry | null> {
+export async function findListEntry(listName: string, pattern: string): Promise<ListEntry | null> {
   const db = await getDatabase()
 
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readonly')
     const store = transaction.objectStore(STORE_NAME)
-    const index = store.index('list_name_domain')
-    const request = index.getAll([listName, domain])
+    const index = store.index('list_name_pattern')
+    const request = index.getAll([listName, pattern])
 
     request.onsuccess = () => {
       const results = request.result
@@ -499,21 +529,21 @@ export async function findListEntry(listName: string, domain: string): Promise<L
 }
 
 /**
- * Find a specific entry in a list by (pattern_type, domain/pattern).
+ * Find a specific entry in a list by (pattern_type, pattern).
  * This is the schema-level uniqueness key.
  */
 export async function findListEntryByPattern(
   listName: string,
   patternType: PatternType,
-  domain: string
+  pattern: string
 ): Promise<ListEntry | null> {
   const db = await getDatabase()
 
   return new Promise((resolve, reject) => {
     const transaction = db.transaction(STORE_NAME, 'readonly')
     const store = transaction.objectStore(STORE_NAME)
-    const index = store.index('list_name_pattern_type_domain')
-    const request = index.get([listName, patternType, domain])
+    const index = store.index('list_name_pattern_type_pattern')
+    const request = index.get([listName, patternType, pattern])
 
     request.onsuccess = () => {
       resolve(request.result || null)
@@ -538,7 +568,7 @@ export async function matchDomainAgainstList(url: string, listName: string): Pro
   }
 
   for (const entry of entries) {
-    if (matchesPattern(url, entry.domain, entry.pattern_type)) {
+    if (matchesPattern(url, entry.pattern, entry.pattern_type)) {
       return entry
     }
   }
@@ -562,7 +592,7 @@ export async function bulkCreateListEntries(entries: Omit<ListEntry, 'id'>[]): P
   const duplicatesInArray: Array<{ index: number, key: string }> = []
   
   entries.forEach((entry, index) => {
-    const key = `${entry.list_name}:${entry.pattern_type}:${entry.domain}`
+    const key = `${entry.list_name}:${entry.pattern_type}:${entry.pattern}`
     if (uniqueKeys.has(key)) {
       duplicatesInArray.push({ index, key })
     }
@@ -614,7 +644,7 @@ export async function bulkCreateListEntries(entries: Omit<ListEntry, 'id'>[]): P
           skipped++
           console.warn(
             `[list-utilities] Skipping duplicate entry at index ${index} ` +
-            `(${entry.list_name}:${entry.pattern_type}:${entry.domain})`
+            `(${entry.list_name}:${entry.pattern_type}:${entry.pattern})`
           )
           if (completed + skipped === entries.length) {
             console.warn(`[list-utilities] Bulk insert completed with ${skipped} skipped duplicates`)
@@ -624,13 +654,13 @@ export async function bulkCreateListEntries(entries: Omit<ListEntry, 'id'>[]): P
           const errorDetails = {
             list_name: entry.list_name,
             pattern_type: entry.pattern_type,
-            domain: entry.domain,
+            pattern: entry.pattern,
             source: entry.source,
             index,
             error: request.error?.message
           }
           console.error('[list-utilities] Bulk insert failed at entry:', errorDetails)
-          reject(new Error(`Failed to create bulk entry at index ${index} (${entry.list_name}:${entry.pattern_type}:${entry.domain}): ${request.error?.message}`))
+          reject(new Error(`Failed to create bulk entry at index ${index} (${entry.list_name}:${entry.pattern_type}:${entry.pattern}): ${request.error?.message}`))
         }
       }
     })
@@ -686,7 +716,7 @@ export async function exportList(listName: string): Promise<string> {
     exported_at: Date.now(),
     version: 1,
     entries: entries.map(entry => ({
-      domain: entry.domain,
+      pattern: entry.pattern,
       pattern_type: entry.pattern_type,
       metadata: entry.metadata
     }))
@@ -714,7 +744,7 @@ export async function importList(listName: string, jsonData: string): Promise<nu
     // Import new entries
     const entries: Omit<ListEntry, 'id'>[] = importData.entries.map((entry: any) => ({ // eslint-disable-line @typescript-eslint/no-explicit-any
       list_name: listName,
-      domain: entry.domain,
+      pattern: entry.pattern,
       pattern_type: entry.pattern_type,
       metadata: entry.metadata || {}
     }))
@@ -832,28 +862,28 @@ export async function mergeBackendList(listName: string, entries: any[]): Promis
 
   // 1b. Ensure uniqueness constraints won't fail when inserting backend entries.
   //
-  // Our IndexedDB schema enforces a unique compound index on (list_name, pattern_type, domain) across ALL sources.
+  // Our IndexedDB schema enforces a unique compound index on (list_name, pattern_type, pattern) across ALL sources.
   // That means a user-created entry (or a previously imported/generated entry) with the same
-  // (pattern_type, domain) would cause backend sync to fail with a uniqueness error.
+  // (pattern_type, pattern) would cause backend sync to fail with a uniqueness error.
   //
   // For backend-first sync, we resolve conflicts by removing any existing entry with the same
-  // (list_name, pattern_type, domain) before inserting the backend-provided version.
+  // (list_name, pattern_type, pattern) before inserting the backend-provided version.
   //
   // We batch these deletions to ensure they complete before bulk insert.
   const entriesToDelete: number[] = []
-  
+
   for (const entry of entries) {
     try {
-      const domain = entry?.domain
+      const pattern = entry?.pattern
       const patternType = entry?.pattern_type as PatternType | undefined
-      if (typeof domain !== 'string' || domain.length === 0) continue
+      if (typeof pattern !== 'string' || pattern.length === 0) continue
       if (!patternType) continue
 
-      const existing = await findListEntryByPattern(listName, patternType, domain)
+      const existing = await findListEntryByPattern(listName, patternType, pattern)
       if (existing?.id !== undefined) {
         entriesToDelete.push(existing.id)
         console.log(
-          `[list-utilities] Found conflicting entry for ${listName}:${patternType}:${domain} ` +
+          `[list-utilities] Found conflicting entry for ${listName}:${patternType}:${pattern} ` +
           `(source=${existing.source ?? 'unknown'}) - will delete`
         )
       }
@@ -877,17 +907,17 @@ export async function mergeBackendList(listName: string, entries: any[]): Promis
   const newEntries: Omit<ListEntry, 'id'>[] = []
 
   for (const entry of entries) {
-    const domain = entry?.domain
+    const pattern = entry?.pattern
     const patternType = entry?.pattern_type as PatternType | undefined
 
-    if (typeof domain !== 'string' || domain.length === 0 || !patternType) {
-      console.warn(`[list-utilities] Skipping invalid backend list entry (missing domain/pattern_type) for ${listName}:`, entry)
+    if (typeof pattern !== 'string' || pattern.length === 0 || !patternType) {
+      console.warn(`[list-utilities] Skipping invalid backend list entry (missing pattern/pattern_type) for ${listName}:`, entry)
       continue
     }
 
-    if (patternType === 'domain' && !isStrictRegisteredDomain(domain)) {
+    if (patternType === 'domain' && !isStrictRegisteredDomain(pattern)) {
       console.error(
-        `[list-utilities] Invalid backend 'domain' pattern "${domain}" in list "${listName}". ` +
+        `[list-utilities] Invalid backend 'domain' pattern "${pattern}" in list "${listName}". ` +
         `This would be misleading/broad. Use a registered domain like "google.com", or pattern_type "host"/"regex" for subdomains. Skipping entry.`
       )
       continue
@@ -895,7 +925,7 @@ export async function mergeBackendList(listName: string, entries: any[]): Promis
 
     newEntries.push({
       list_name: listName,
-      domain,
+      pattern,
       pattern_type: patternType,
       source: 'backend' as const,
       metadata: {

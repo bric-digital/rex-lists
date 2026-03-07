@@ -11,7 +11,7 @@ Core list storage and URL matching utilities for REX browser extensions.
 - List management API (add, remove, query entries)
 - Support for backend-synced and user-defined entries
 
-This module is the storage/matching layer. For the UI and sync functionality, see [webmunk-lists-front-end](https://github.com/bric-digital/webmunk-lists-front-end).
+This module is the storage/matching layer. For the UI and sync functionality, see [rex-lists-front-end](https://github.com/bric-digital/rex-lists-front-end).
 
 ## Configuration
 
@@ -115,7 +115,7 @@ The `lists` object contains named lists, where each list is an array of pattern 
 Lists are referenced by name in other module configurations:
 
 - **rex-history**: Uses `allow_lists`, `filter_lists`, `category_lists` to control what history is collected
-- **webmunk-lists-front-end**: Displays and manages list entries
+- **rex-lists-front-end**: Displays and manages list entries
 
 ### Entry Sources
 
