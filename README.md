@@ -34,8 +34,8 @@ The `lists` object contains named lists, where each list is an array of pattern 
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `domain` | string | Yes | The pattern to match (despite the name, stores any pattern type) |
-| `pattern_type` | string | Yes | One of: `domain`, `host`, `exact_url`, `host_path_prefix`, `regex` |
+| `pattern` | string | Yes | The pattern to match (format depends on `pattern_type`) |
+| `pattern_type` | string | Yes | One of: `domain`, `host`, `subdomain_wildcard`, `exact_url`, `host_path_prefix`, `regex` |
 | `metadata` | object | No | Arbitrary metadata (e.g., `category`, `name`, `description`) |
 
 ### Pattern Types
@@ -44,9 +44,12 @@ The `lists` object contains named lists, where each list is an array of pattern 
 |--------------|-------------|-----------------|---------|
 | `domain` | Registered domain only (eTLD+1). Uses Public Suffix List. | `google.com` | `https://www.google.com/maps`, `https://mail.google.com` |
 | `host` | Exact hostname match. Leading `www.` is normalized. | `mail.google.com` | `https://mail.google.com/inbox` |
+| `subdomain_wildcard` | Server-side alias for `host`. Identical behavior. | `mail.google.com` | `https://mail.google.com/inbox` |
 | `exact_url` | Full URL must match exactly. | `https://example.com/login` | Only that exact URL |
 | `host_path_prefix` | Hostname + path prefix. Query string ignored. | `example.com/maps` | `https://example.com/maps/directions` |
 | `regex` | JavaScript regex applied to full URL. | `^https://(www\.)?example\.com/.*` | `https://example.com/anything` |
+
+**Note**: Backend sync (`mergeBackendList`) also accepts `domain` as a fallback field name for backwards compatibility — if `pattern` is not present, it reads `domain` instead. New configurations should use `pattern`.
 
 ### Example
 
@@ -55,53 +58,53 @@ The `lists` object contains named lists, where each list is an array of pattern 
   "lists": {
     "serp": [
       {
-        "domain": "google.com/search",
+        "pattern": "google.com/search",
         "pattern_type": "host_path_prefix",
         "metadata": { "name": "Google Search", "category": "serp" }
       },
       {
-        "domain": "bing.com/search",
+        "pattern": "bing.com/search",
         "pattern_type": "host_path_prefix",
         "metadata": { "name": "Bing Search", "category": "serp" }
       },
       {
-        "domain": "^https?://(www\\.)?duckduckgo\\.com/.*[?&]q=",
+        "pattern": "^https?://(www\\.)?duckduckgo\\.com/.*[?&]q=",
         "pattern_type": "regex",
         "metadata": { "name": "DuckDuckGo Search", "category": "serp" }
       }
     ],
     "news-sites": [
       {
-        "domain": "nytimes.com",
+        "pattern": "nytimes.com",
         "pattern_type": "domain",
         "metadata": { "name": "New York Times", "category": "news" }
       },
       {
-        "domain": "cnn.com",
+        "pattern": "cnn.com",
         "pattern_type": "domain",
         "metadata": { "name": "CNN", "category": "news" }
       }
     ],
     "ai-chatbots": [
       {
-        "domain": "chatgpt.com",
+        "pattern": "chatgpt.com",
         "pattern_type": "domain",
         "metadata": { "name": "ChatGPT", "category": "AI Chatbot" }
       },
       {
-        "domain": "perplexity.ai",
+        "pattern": "perplexity.ai",
         "pattern_type": "domain",
         "metadata": { "name": "Perplexity", "category": "AI Chatbot" }
       },
       {
-        "domain": "claude.ai",
+        "pattern": "claude.ai",
         "pattern_type": "domain",
         "metadata": { "name": "Claude", "category": "AI Chatbot" }
       }
     ],
     "history-filter": [
       {
-        "domain": "msn.com/en-us/play",
+        "pattern": "msn.com/en-us/play",
         "pattern_type": "host_path_prefix",
         "metadata": { "category": "entertainment" }
       }
@@ -133,7 +136,7 @@ Backend sync replaces only `backend` entries, preserving `user` and `generated` 
 
 - **Database**: IndexedDB database `webmunk_lists`
 - **Store**: `list_entries`
-- **Uniqueness**: Entries are unique on `(list_name, pattern_type, domain)`
+- **Uniqueness**: Entries are unique on `(list_name, pattern_type, pattern)`
 
 ## Installation
 
@@ -152,22 +155,47 @@ Then run `npm install`.
 ## API
 
 ```typescript
-import { matchUrl, getListEntries, addEntry } from '@bric/rex-lists'
+import {
+  matchDomainAgainstList,
+  getListEntries,
+  createListEntry,
+  findListEntry,
+  findListEntryByPattern,
+  deleteListEntry,
+  deleteAllEntriesInList,
+  bulkCreateListEntries,
+  bulkDeleteListEntries,
+  updateListEntry,
+  getAllLists,
+  exportList,
+  importList,
+  syncListsFromConfig,
+  parseAndSyncLists,
+  mergeBackendList,
+  matchesPattern,
+  setDebug
+} from '@bric/rex-lists'
 
 // Check if URL matches any entry in a list
-const match = await matchUrl('https://www.google.com/search?q=test', 'serp')
+const match = await matchDomainAgainstList('https://www.google.com/search?q=test', 'serp')
 
 // Get all entries for a list
 const entries = await getListEntries('news-sites')
 
 // Add a user entry
-await addEntry({
+await createListEntry({
   list_name: 'news-sites',
-  domain: 'example-news.com',
+  pattern: 'example-news.com',
   pattern_type: 'domain',
   source: 'user',
   metadata: { name: 'Example News' }
 })
+
+// Find a specific entry
+const entry = await findListEntryByPattern('news-sites', 'domain', 'cnn.com')
+
+// Check a single pattern match (synchronous)
+const isMatch = matchesPattern('https://www.google.com/maps', 'google.com', 'domain')
 ```
 
 ## License
