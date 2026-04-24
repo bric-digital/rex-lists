@@ -753,9 +753,11 @@ export async function importList(listName: string, jsonData: string): Promise<nu
     return ids.length
   } catch (error) {
     if (error instanceof Error) {
-      throw new Error(`Failed to import list: ${error.message}`, { cause: error })
+      // eslint-disable-next-line preserve-caught-error -- Error cause: {} constructor arg is TS2022+ lib, not available in consumer toolchains yet
+      throw new Error(`Failed to import list: ${error.message}`)
     }
-    throw new Error('Failed to import list: Unknown error', { cause: error })
+    // eslint-disable-next-line preserve-caught-error -- Error cause: {} constructor arg is TS2022+ lib, not available in consumer toolchains yet
+    throw new Error('Failed to import list: Unknown error')
   }
 }
 
@@ -899,7 +901,8 @@ export async function mergeBackendList(listName: string, entries: any[]): Promis
       console.log(`[list-utilities] Deleted ${entriesToDelete.length} conflicting entries for ${listName}`)
     } catch (error) {
       console.error(`[list-utilities] Failed to delete conflicting entries:`, error)
-      throw new Error(`Failed to clear conflicts before sync: ${error instanceof Error ? error.message : 'unknown'}`, { cause: error })
+      // eslint-disable-next-line preserve-caught-error -- Error cause: {} constructor arg is TS2022+ lib, not available in consumer toolchains yet
+      throw new Error(`Failed to clear conflicts before sync: ${error instanceof Error ? error.message : 'unknown'}`)
     }
   }
 
