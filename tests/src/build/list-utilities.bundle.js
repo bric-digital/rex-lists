@@ -10466,9 +10466,9 @@ async function importList(listName, jsonData) {
     return ids.length;
   } catch (error) {
     if (error instanceof Error) {
-      throw new Error(`Failed to import list: ${error.message}`);
+      throw new Error(`Failed to import list: ${error.message}`, { cause: error });
     }
-    throw new Error("Failed to import list: Unknown error");
+    throw new Error("Failed to import list: Unknown error", { cause: error });
   }
 }
 async function syncListsFromConfig(configUrl) {
@@ -10553,7 +10553,7 @@ async function mergeBackendList(listName, entries) {
       console.log(`[list-utilities] Deleted ${entriesToDelete.length} conflicting entries for ${listName}`);
     } catch (error) {
       console.error(`[list-utilities] Failed to delete conflicting entries:`, error);
-      throw new Error(`Failed to clear conflicts before sync: ${error instanceof Error ? error.message : "unknown"}`);
+      throw new Error(`Failed to clear conflicts before sync: ${error instanceof Error ? error.message : "unknown"}`, { cause: error });
     }
   }
   const newEntries = [];
