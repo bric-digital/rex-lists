@@ -39,7 +39,7 @@
         "@types/psl": "^1.1.3",
         "chrome-types": "^0.1.404",
         "esbuild": "^0.27.2",
-        "eslint": "^9.39.2",
+        "eslint": "^10.2.1",
         "globals": "^16.5.0",
         "jiti": "^2.6.1",
         "typescript": "^5.9.2",
