@@ -116,6 +116,42 @@
 
     <div id="output"></div>
 
+    <script>
+        // chrome.storage.local shim — backs onto localStorage so tests run outside an extension context
+        (function() {
+            const STORAGE_KEY_PREFIX = '__chrome_storage_local__';
+            window.chrome = window.chrome || {};
+            window.chrome.storage = window.chrome.storage || {};
+            window.chrome.storage.local = {
+                get: function(keys, callback) {
+                    const result = {};
+                    const keyList = Array.isArray(keys) ? keys : (typeof keys === 'string' ? [keys] : Object.keys(keys));
+                    for (const key of keyList) {
+                        const raw = localStorage.getItem(STORAGE_KEY_PREFIX + key);
+                        if (raw !== null) result[key] = JSON.parse(raw);
+                    }
+                    if (callback) { callback(result); return; }
+                    return Promise.resolve(result);
+                },
+                set: function(items, callback) {
+                    for (const [key, value] of Object.entries(items)) {
+                        localStorage.setItem(STORAGE_KEY_PREFIX + key, JSON.stringify(value));
+                    }
+                    if (callback) { callback(); return; }
+                    return Promise.resolve();
+                },
+                remove: function(keys, callback) {
+                    const keyList = Array.isArray(keys) ? keys : [keys];
+                    for (const key of keyList) {
+                        localStorage.removeItem(STORAGE_KEY_PREFIX + key);
+                    }
+                    if (callback) { callback(); return; }
+                    return Promise.resolve();
+                }
+            };
+        })();
+    </script>
+
     <script type="module">
         // Import the bundled list utilities
         import * as ListUtilities from './build/list-utilities.bundle.js';
@@ -135,6 +171,15 @@
                     setTimeout(resolve, 100);
                 };
             });
+        };
+
+        // Helpers for hash-skip tests
+        window.clearSyncHash = async function() {
+            await chrome.storage.local.remove('rexListsLastSyncedHash');
+        };
+        window.getStoredSyncHash = async function() {
+            const result = await chrome.storage.local.get('rexListsLastSyncedHash');
+            return result['rexListsLastSyncedHash'] ?? null;
         };
 
         // Signal that test utilities are ready
