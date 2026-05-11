@@ -28,7 +28,7 @@ async function getLastSyncedListsHash(): Promise<string | undefined> {
     const result = await chrome.storage.local.get(LISTS_HASH_STORAGE_KEY)
     const value = result[LISTS_HASH_STORAGE_KEY]
     return typeof value === 'string' ? value : undefined
-  } catch (_) {
+  } catch {
     return undefined
   }
 }
