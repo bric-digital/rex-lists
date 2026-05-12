@@ -311,6 +311,25 @@ export async function getListEntries(listName: string): Promise<ListEntry[]> {
   })
 }
 
+export async function hasListEntries(listName: string): Promise<boolean> {
+  const db = await getDatabase()
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readonly')
+    const store = transaction.objectStore(STORE_NAME)
+    const index = store.index('list_name')
+    const request = index.count(listName)
+
+    request.onsuccess = () => {
+      resolve(request.result > 0)
+    }
+
+    request.onerror = () => {
+      reject(new Error(`Failed to count list entries: ${request.error?.message}`))
+    }
+  })
+}
+
 /**
  * Get entries for a specific list filtered by source
  */
