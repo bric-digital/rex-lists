@@ -8,6 +8,40 @@
 import psl from 'psl'
 
 // ============================================================================
+// List-sync hash helpers
+// ============================================================================
+
+const LISTS_HASH_STORAGE_KEY = 'rexListsLastSyncedHash'
+
+async function hashListsConfig(listsConfig: Record<string, unknown>): Promise<string> {
+  const sorted: Record<string, unknown> = {}
+  for (const key of Object.keys(listsConfig).sort()) {
+    sorted[key] = listsConfig[key]
+  }
+  const encoded = new TextEncoder().encode(JSON.stringify(sorted))
+  const digest = await crypto.subtle.digest('SHA-256', encoded)
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+async function getLastSyncedListsHash(): Promise<string | undefined> {
+  try {
+    const result = await chrome.storage.local.get(LISTS_HASH_STORAGE_KEY)
+    const value = result[LISTS_HASH_STORAGE_KEY]
+    return typeof value === 'string' ? value : undefined
+  } catch {
+    return undefined
+  }
+}
+
+async function setLastSyncedListsHash(hash: string): Promise<void> {
+  await chrome.storage.local.set({ [LISTS_HASH_STORAGE_KEY]: hash })
+}
+
+async function clearLastSyncedListsHash(): Promise<void> {
+  await chrome.storage.local.remove(LISTS_HASH_STORAGE_KEY)
+}
+
+// ============================================================================
 // Debug Configuration
 // ============================================================================
 
@@ -487,7 +521,7 @@ export async function resetListDatabase(): Promise<void> {
 
     request.onsuccess = () => {
       console.log('[list-utilities] Database reset complete')
-      resolve()
+      clearLastSyncedListsHash().then(resolve, resolve)
     }
 
     request.onerror = () => {
@@ -819,10 +853,21 @@ export async function syncListsFromConfig(configUrl: string): Promise<SyncResult
  *
  * @param listsConfig - Object with list names as keys and entry arrays as values
  */
-export async function parseAndSyncLists(listsConfig: Record<string, any[]>): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
-  const listNames = Object.keys(listsConfig)
+export async function parseAndSyncLists(listsConfig: Record<string, any[]>, options?: { force?: boolean }): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  if (!options?.force) {
+    const newHash = await hashListsConfig(listsConfig as Record<string, unknown>)
+    const storedHash = await getLastSyncedListsHash()
+    if (storedHash !== undefined && storedHash === newHash) {
+      console.log('[list-utilities] Lists config unchanged, skipping sync')
+      return
+    }
+  }
 
+  const listNames = Object.keys(listsConfig)
   console.log(`[list-utilities] Syncing ${listNames.length} lists`)
+
+  let anyError = false
+  const newHash = await hashListsConfig(listsConfig as Record<string, unknown>)
 
   for (const listName of listNames) {
     const entries = listsConfig[listName]
@@ -836,8 +881,13 @@ export async function parseAndSyncLists(listsConfig: Record<string, any[]>): Pro
       await mergeBackendList(listName, entries)
       console.log(`[list-utilities] Synced list: ${listName} (${entries.length} entries)`)
     } catch (error) {
+      anyError = true
       console.error(`[list-utilities] Failed to sync list ${listName}:`, error)
     }
+  }
+
+  if (!anyError) {
+    await setLastSyncedListsHash(newHash)
   }
 }
 
