@@ -721,6 +721,62 @@ test.describe('List Utilities - matchDomainAgainstList end-to-end', () => {
     expect(match.pattern).toBe('bric.digital');
     expect(match.metadata.category).toBe('tech');
   });
+
+  test('priority: exact_url beats host when both match, regardless of insertion order', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      // Insert host first (lower priority), then exact_url (higher priority)
+      await window.ListUtilities.bulkCreateListEntries([
+        { list_name: 'priority-list', pattern: 'ssm.bric.digital', pattern_type: 'host', source: 'backend', metadata: { category: 'host-entry' } },
+        { list_name: 'priority-list', pattern: 'https://ssm.bric.digital/page', pattern_type: 'exact_url', source: 'backend', metadata: { category: 'exact-entry' } }
+      ]);
+      return await window.ListUtilities.matchDomainAgainstList('https://ssm.bric.digital/page', 'priority-list');
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern_type).toBe('exact_url');
+    expect(match.metadata.category).toBe('exact-entry');
+  });
+
+  test('priority: host_path_prefix beats domain when both match, regardless of insertion order', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      // Insert domain first (lower priority), then host_path_prefix (higher priority)
+      await window.ListUtilities.bulkCreateListEntries([
+        { list_name: 'priority-list', pattern: 'bric.digital', pattern_type: 'domain', source: 'backend', metadata: { category: 'domain-entry' } },
+        { list_name: 'priority-list', pattern: 'bric.digital/about', pattern_type: 'host_path_prefix', source: 'backend', metadata: { category: 'prefix-entry' } }
+      ]);
+      return await window.ListUtilities.matchDomainAgainstList('https://bric.digital/about/team', 'priority-list');
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern_type).toBe('host_path_prefix');
+    expect(match.metadata.category).toBe('prefix-entry');
+  });
+
+  test('priority: subdomain_wildcard beats domain when both match, regardless of insertion order', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      // Insert domain first (lower priority), then subdomain_wildcard (higher priority)
+      await window.ListUtilities.bulkCreateListEntries([
+        { list_name: 'priority-list', pattern: 'bric.digital', pattern_type: 'domain', source: 'backend', metadata: { category: 'domain-entry' } },
+        { list_name: 'priority-list', pattern: 'ssm.bric.digital', pattern_type: 'subdomain_wildcard', source: 'backend', metadata: { category: 'subdomain-entry' } }
+      ]);
+      return await window.ListUtilities.matchDomainAgainstList('https://ssm.bric.digital/page', 'priority-list');
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern_type).toBe('subdomain_wildcard');
+    expect(match.metadata.category).toBe('subdomain-entry');
+  });
+
+  test('priority: host beats domain when both match, regardless of insertion order', async ({ page }) => {
+    const match = await page.evaluate(async () => {
+      // Insert domain first (lower priority), then host (higher priority)
+      await window.ListUtilities.bulkCreateListEntries([
+        { list_name: 'priority-list', pattern: 'bric.digital', pattern_type: 'domain', source: 'backend', metadata: { category: 'domain-entry' } },
+        { list_name: 'priority-list', pattern: 'ssm.bric.digital', pattern_type: 'host', source: 'backend', metadata: { category: 'host-entry' } }
+      ]);
+      return await window.ListUtilities.matchDomainAgainstList('https://ssm.bric.digital/page', 'priority-list');
+    });
+    expect(match).not.toBeNull();
+    expect(match.pattern_type).toBe('host');
+    expect(match.metadata.category).toBe('host-entry');
+  });
 });
 
 test.describe('List Utilities - Bulk Operations', () => {

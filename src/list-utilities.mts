@@ -620,7 +620,11 @@ export async function matchDomainAgainstList(url: string, listName: string): Pro
     console.log(entries)
   }
 
-  for (const entry of entries) {
+  const sorted = [...entries].sort(
+    (a, b) => (PATTERN_TYPE_PRIORITY[a.pattern_type] ?? 99) - (PATTERN_TYPE_PRIORITY[b.pattern_type] ?? 99)
+  )
+
+  for (const entry of sorted) {
     if (matchesPattern(url, entry.pattern, entry.pattern_type)) {
       return entry
     }
@@ -1019,6 +1023,15 @@ export async function mergeBackendList(listName: string, entries: any[]): Promis
 // ============================================================================
 // Pattern Matching
 // ============================================================================
+
+const PATTERN_TYPE_PRIORITY: Record<PatternType, number> = {
+  exact_url: 0,
+  regex: 1,
+  host_path_prefix: 2,
+  subdomain_wildcard: 3,
+  host: 3,
+  domain: 4,
+}
 
 /**
  * Check if a URL matches a pattern based on pattern type
