@@ -7,4 +7,4 @@
 
 export * from './storage.mjs'
 export * from './matching.mjs'
-export * from './loading.mjs'
+export { syncListsFromConfig, parseAndSyncLists, mergeBackendList } from './loading.mjs'

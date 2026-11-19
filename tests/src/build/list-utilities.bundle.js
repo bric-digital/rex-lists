@@ -10208,14 +10208,6 @@ async function hashListsSection(lists) {
   const digest = await crypto.subtle.digest("SHA-256", encoded);
   return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
 }
-async function getAttemptedListsHash() {
-  const result = await chrome.storage.local.get(ATTEMPTED_LISTS_HASH_STORAGE_KEY);
-  const value = result[ATTEMPTED_LISTS_HASH_STORAGE_KEY];
-  if (typeof value === "string") {
-    return value;
-  }
-  return void 0;
-}
 async function recordAttemptedLists(listsConfig) {
   const hash = await hashListsSection(listsConfig);
   await chrome.storage.local.set({ [ATTEMPTED_LISTS_HASH_STORAGE_KEY]: hash });
@@ -10839,8 +10831,6 @@ async function importList(listName, jsonData) {
 export {
   bulkCreateListEntries,
   bulkDeleteListEntries,
-  clearAttemptedListsHash,
-  clearLastSyncedListsHash,
   createListEntry,
   deleteAllEntriesInList,
   deleteListEntry,
@@ -10848,11 +10838,9 @@ export {
   findListEntry,
   findListEntryByPattern,
   getAllLists,
-  getAttemptedListsHash,
   getListEntries,
   getListEntriesBySource,
   hasListEntries,
-  hashListsSection,
   importList,
   initializeListDatabase,
   isStrictRegisteredDomain,
@@ -10860,7 +10848,6 @@ export {
   matchesPattern,
   mergeBackendList,
   parseAndSyncLists,
-  recordAttemptedLists,
   registeredDomainOf,
   replaceBackendEntries,
   resetListDatabase,
