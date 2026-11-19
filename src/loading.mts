@@ -7,6 +7,8 @@ import { isStrictRegisteredDomain } from './matching.mjs'
 // ============================================================================
 
 const LISTS_HASH_STORAGE_KEY = 'rexListsLastSyncedHash'
+const SYNC_IN_PROGRESS_STORAGE_KEY = 'rexListsSyncInProgress'
+const SYNC_ATTEMPT_FINISHED_STORAGE_KEY = 'rexListsSyncAttemptFinished'
 
 async function hashListsConfig(listsConfig: Record<string, unknown>): Promise<string> {
   const sorted: Record<string, unknown> = {}
@@ -33,13 +35,55 @@ async function setLastSyncedListsHash(hash: string): Promise<void> {
 }
 
 export async function listsLoaded(): Promise<boolean> {
-  const hash = await getLastSyncedListsHash()
+  try {
+    const result = await chrome.storage.local.get([SYNC_IN_PROGRESS_STORAGE_KEY, SYNC_ATTEMPT_FINISHED_STORAGE_KEY])
 
-  return hash !== undefined
+    if (result[SYNC_IN_PROGRESS_STORAGE_KEY] === true) {
+      return false
+    }
+
+    return result[SYNC_ATTEMPT_FINISHED_STORAGE_KEY] === true
+  } catch {
+    return false
+  }
 }
 
 export async function clearLastSyncedListsHash(): Promise<void> {
   await chrome.storage.local.remove(LISTS_HASH_STORAGE_KEY)
+}
+
+// ============================================================================
+// List-sync progress
+// ============================================================================
+
+let syncsUnderway = 0
+
+export function beginListSync(): Promise<void> {
+  syncsUnderway += 1
+
+  return chrome.storage.local.set({ [SYNC_IN_PROGRESS_STORAGE_KEY]: true })
+}
+
+export async function endListSync(attemptFinished: boolean): Promise<void> {
+  syncsUnderway -= 1
+
+  if (attemptFinished === true) {
+    await chrome.storage.local.set({ [SYNC_ATTEMPT_FINISHED_STORAGE_KEY]: true })
+  }
+
+  if (syncsUnderway === 0) {
+    await chrome.storage.local.remove(SYNC_IN_PROGRESS_STORAGE_KEY)
+  }
+}
+
+export async function clearListSyncProgress(): Promise<void> {
+  await chrome.storage.local.remove([SYNC_IN_PROGRESS_STORAGE_KEY, SYNC_ATTEMPT_FINISHED_STORAGE_KEY])
+}
+
+export async function clearStaleListSync(): Promise<void> {
+  if (syncsUnderway === 0) {
+    await chrome.storage.local.remove(SYNC_IN_PROGRESS_STORAGE_KEY)
+  }
 }
 
 // ============================================================================
@@ -101,6 +145,15 @@ export async function syncListsFromConfig(configUrl: string): Promise<SyncResult
  * @param listsConfig - Object with list names as keys and entry arrays as values
  */
 export async function parseAndSyncLists(listsConfig: Record<string, any[]>, options?: { force?: boolean }): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
+  try {
+    await beginListSync()
+    await syncListsUnlessUnchanged(listsConfig, options)
+  } finally {
+    await endListSync(true)
+  }
+}
+
+async function syncListsUnlessUnchanged(listsConfig: Record<string, any[]>, options?: { force?: boolean }): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
   if (!options?.force) {
     const newHash = await hashListsConfig(listsConfig as Record<string, unknown>)
     const storedHash = await getLastSyncedListsHash()

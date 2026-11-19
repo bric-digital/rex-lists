@@ -1,5 +1,5 @@
 import { isStrictRegisteredDomain } from './matching.mjs'
-import { clearLastSyncedListsHash } from './loading.mjs'
+import { clearLastSyncedListsHash, clearListSyncProgress } from './loading.mjs'
 
 // ============================================================================
 // Types and Interfaces
@@ -457,7 +457,7 @@ export async function resetListDatabase(): Promise<void> {
 
     request.onsuccess = () => {
       console.log('[list-utilities] Database reset complete')
-      clearLastSyncedListsHash().then(resolve, resolve)
+      Promise.all([clearLastSyncedListsHash(), clearListSyncProgress()]).then(() => resolve(), () => resolve())
     }
 
     request.onerror = () => {

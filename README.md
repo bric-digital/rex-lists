@@ -15,7 +15,7 @@ This module is the storage/matching layer. For the UI and sync functionality, se
 
 ## Loading lists
 
-An extension imports `@bric/rex-lists/service-worker` in its service-worker entry file. That module reads the `lists` section of the configuration and stores it, on setup and whenever rex-core refreshes configuration. `lists_config.debug` turns on matching logs. `listsLoaded()` resolves true once a sync has completed without error. `registeredDomainOf(url)` returns a URL's registered domain, or an empty string. Redaction is not part of this module.
+An extension imports `@bric/rex-lists/service-worker` in its service-worker entry file. That module reads the `lists` section of the configuration and stores it, on setup and whenever rex-core refreshes configuration. `lists_config.debug` turns on matching logs. `listsLoaded()` resolves true when a list sync attempt has finished at least once and no sync is in progress. A finished attempt includes one where a list failed, one skipped because the lists are unchanged, and configuration that has no `lists` section; it never rejects. `registeredDomainOf(url)` returns a URL's registered domain, or an empty string. Redaction is not part of this module.
 
 ## Configuration
 

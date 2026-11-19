@@ -10170,6 +10170,8 @@ function matchesPattern(url, pattern, patternType) {
 
 // src/loading.mts
 var LISTS_HASH_STORAGE_KEY = "rexListsLastSyncedHash";
+var SYNC_IN_PROGRESS_STORAGE_KEY = "rexListsSyncInProgress";
+var SYNC_ATTEMPT_FINISHED_STORAGE_KEY = "rexListsSyncAttemptFinished";
 async function hashListsConfig(listsConfig) {
   const sorted = {};
   for (const key of Object.keys(listsConfig).sort()) {
@@ -10192,11 +10194,40 @@ async function setLastSyncedListsHash(hash) {
   await chrome.storage.local.set({ [LISTS_HASH_STORAGE_KEY]: hash });
 }
 async function listsLoaded() {
-  const hash = await getLastSyncedListsHash();
-  return hash !== void 0;
+  try {
+    const result = await chrome.storage.local.get([SYNC_IN_PROGRESS_STORAGE_KEY, SYNC_ATTEMPT_FINISHED_STORAGE_KEY]);
+    if (result[SYNC_IN_PROGRESS_STORAGE_KEY] === true) {
+      return false;
+    }
+    return result[SYNC_ATTEMPT_FINISHED_STORAGE_KEY] === true;
+  } catch {
+    return false;
+  }
 }
 async function clearLastSyncedListsHash() {
   await chrome.storage.local.remove(LISTS_HASH_STORAGE_KEY);
+}
+var syncsUnderway = 0;
+function beginListSync() {
+  syncsUnderway += 1;
+  return chrome.storage.local.set({ [SYNC_IN_PROGRESS_STORAGE_KEY]: true });
+}
+async function endListSync(attemptFinished) {
+  syncsUnderway -= 1;
+  if (attemptFinished === true) {
+    await chrome.storage.local.set({ [SYNC_ATTEMPT_FINISHED_STORAGE_KEY]: true });
+  }
+  if (syncsUnderway === 0) {
+    await chrome.storage.local.remove(SYNC_IN_PROGRESS_STORAGE_KEY);
+  }
+}
+async function clearListSyncProgress() {
+  await chrome.storage.local.remove([SYNC_IN_PROGRESS_STORAGE_KEY, SYNC_ATTEMPT_FINISHED_STORAGE_KEY]);
+}
+async function clearStaleListSync() {
+  if (syncsUnderway === 0) {
+    await chrome.storage.local.remove(SYNC_IN_PROGRESS_STORAGE_KEY);
+  }
 }
 async function syncListsFromConfig(configUrl) {
   const errors = [];
@@ -10231,6 +10262,14 @@ async function syncListsFromConfig(configUrl) {
   }
 }
 async function parseAndSyncLists(listsConfig, options) {
+  try {
+    await beginListSync();
+    await syncListsUnlessUnchanged(listsConfig, options);
+  } finally {
+    await endListSync(true);
+  }
+}
+async function syncListsUnlessUnchanged(listsConfig, options) {
   if (!options?.force) {
     const newHash2 = await hashListsConfig(listsConfig);
     const storedHash = await getLastSyncedListsHash();
@@ -10572,7 +10611,7 @@ async function resetListDatabase() {
     const request = indexedDB.deleteDatabase(DB_NAME);
     request.onsuccess = () => {
       console.log("[list-utilities] Database reset complete");
-      clearLastSyncedListsHash().then(resolve, resolve);
+      Promise.all([clearLastSyncedListsHash(), clearListSyncProgress()]).then(() => resolve(), () => resolve());
     };
     request.onerror = () => {
       reject(new Error(`Failed to reset database: ${request.error?.message}`));
@@ -10802,12 +10841,16 @@ async function importList(listName, jsonData) {
   }
 }
 export {
+  beginListSync,
   bulkCreateListEntries,
   bulkDeleteListEntries,
   clearLastSyncedListsHash,
+  clearListSyncProgress,
+  clearStaleListSync,
   createListEntry,
   deleteAllEntriesInList,
   deleteListEntry,
+  endListSync,
   exportList,
   findListEntry,
   findListEntryByPattern,
