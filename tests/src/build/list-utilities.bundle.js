@@ -10041,15 +10041,15 @@ function registeredDomainOf(url) {
     return "";
   }
   if (isIpAddress(hostname)) {
-    return "";
+    return hostname;
   }
   const parsed = na.parse(hostname);
   if (parsed.error !== void 0) {
-    return "";
+    return hostname;
   }
   const domain = parsed.domain;
   if (domain === null || domain === void 0) {
-    return "";
+    return hostname;
   }
   return domain;
 }

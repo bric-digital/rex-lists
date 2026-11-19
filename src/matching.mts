@@ -63,19 +63,19 @@ export function registeredDomainOf(url: string): string {
   }
 
   if (isIpAddress(hostname)) {
-    return ''
+    return hostname
   }
 
   const parsed = psl.parse(hostname)
 
   if (parsed.error !== undefined) {
-    return ''
+    return hostname
   }
 
   const domain = (parsed as psl.ParsedDomain).domain
 
   if (domain === null || domain === undefined) {
-    return ''
+    return hostname
   }
 
   return domain

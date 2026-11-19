@@ -140,6 +140,7 @@ test('registeredDomainOf', async ({ serviceWorker }) => {
     self.registeredDomainOf('not a url'),
     self.registeredDomainOf('http://[::1]/'),
     self.registeredDomainOf('http://localhost/'),
+    self.registeredDomainOf('about:blank'),
   ])
-  expect(result).toEqual(['example.co.uk', '', '', '', ''])
+  expect(result).toEqual(['example.co.uk', '127.0.0.1', '', '[::1]', 'localhost', ''])
 })
