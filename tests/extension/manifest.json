@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "REX Lists Test Extension",
+  "version": "0.0.1",
+  "description": "Loads the rex-lists service-worker module for Playwright tests.",
+  "permissions": ["storage"],
+  "background": {
+    "service_worker": "service-worker.bundle.js",
+    "type": "module"
+  }
+}

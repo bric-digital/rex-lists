@@ -124,6 +124,9 @@ test.describe('parseAndSyncLists - hash-based skip', () => {
     const hashAfterSync = await page.evaluate(() => window.getStoredSyncHash());
     expect(hashAfterSync).not.toBeNull();
 
+    const attemptedAfterSync = await page.evaluate(() => chrome.storage.local.get('rexListsLastAttemptedHash'));
+    expect(typeof attemptedAfterSync.rexListsLastAttemptedHash).toBe('string');
+
     // Navigate away to close all IDB connections, then back to run resetListDatabase cleanly
     await page.goto('about:blank');
     await page.goto('/test-page.html');
@@ -134,5 +137,8 @@ test.describe('parseAndSyncLists - hash-based skip', () => {
 
     const hashAfterReset = await page.evaluate(() => window.getStoredSyncHash());
     expect(hashAfterReset).toBeNull();
+
+    const attemptedAfterReset = await page.evaluate(() => chrome.storage.local.get('rexListsLastAttemptedHash'));
+    expect(attemptedAfterReset).toEqual({});
   });
 });

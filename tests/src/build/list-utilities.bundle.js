@@ -10011,7 +10011,7 @@ var oa = (e) => {
 };
 var na = { parse: O, get: aa, isValid: oa };
 
-// src/list-utilities.mts
+// src/matching.mts
 var debugEnabled = false;
 function setDebug(enabled) {
   debugEnabled = enabled;
@@ -10028,6 +10028,303 @@ function isStrictRegisteredDomain(pattern) {
   if (!domain) return false;
   return candidate === domain;
 }
+function isIpAddress(hostname) {
+  const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  const isIpv6 = hostname.startsWith("[");
+  return isIpv4 || isIpv6;
+}
+function registeredDomainOf(url) {
+  let hostname;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return "";
+  }
+  if (isIpAddress(hostname)) {
+    return hostname;
+  }
+  const parsed = na.parse(hostname);
+  if (parsed.error !== void 0) {
+    return hostname;
+  }
+  const domain = parsed.domain;
+  if (domain === null || domain === void 0) {
+    return hostname;
+  }
+  return domain;
+}
+async function matchDomainAgainstList(url, listName) {
+  const entries = await getListEntries(listName);
+  if (debugEnabled) {
+    console.log(`[rex-lists] matchDomainAgainstList`);
+    console.log(entries);
+  }
+  const sorted = [...entries].sort(
+    (a, b) => (PATTERN_TYPE_PRIORITY[a.pattern_type] ?? 99) - (PATTERN_TYPE_PRIORITY[b.pattern_type] ?? 99)
+  );
+  for (const entry of sorted) {
+    if (matchesPattern(url, entry.pattern, entry.pattern_type)) {
+      return entry;
+    }
+  }
+  return null;
+}
+var PATTERN_TYPE_PRIORITY = {
+  exact_url: 0,
+  regex: 1,
+  host_path_prefix: 2,
+  subdomain_wildcard: 3,
+  host: 3,
+  domain: 4
+};
+function matchesPattern(url, pattern, patternType) {
+  try {
+    const urlObj = new URL(url);
+    const hostname = urlObj.hostname;
+    if (debugEnabled) {
+      console.log(`[rex-lists] matchesPattern("${url}", "${pattern}", "${patternType}")`);
+    }
+    switch (patternType) {
+      case "domain": {
+        if (!isStrictRegisteredDomain(pattern)) {
+          console.warn(
+            `[list-utilities] Invalid 'domain' pattern "${pattern}". Use a registered domain like "google.com", or use pattern_type "host"/"regex" for subdomains.`
+          );
+          return false;
+        }
+        const urlParsed = na.parse(hostname);
+        if (urlParsed.error !== void 0) return false;
+        const urlDomain = urlParsed.domain;
+        if (!urlDomain) return false;
+        return urlDomain === normalizeLeadingWww(pattern.trim());
+      }
+      case "subdomain_wildcard":
+      // Server-side alias for 'host'. The server stores this pattern type as 'subdomain_wildcard'
+      // (a legacy name), but behavior is identical to 'host': exact hostname match, www-normalized.
+      // Falls through intentionally.
+      case "host": {
+        const urlHostNormalized = normalizeLeadingWww(hostname);
+        let patternHost = pattern;
+        if (pattern.includes("://")) {
+          patternHost = new URL(pattern).hostname;
+        } else if (pattern.includes("/")) {
+          patternHost = pattern.split("/")[0] ?? "";
+        }
+        const patternHostNormalized = normalizeLeadingWww(patternHost);
+        if (!patternHostNormalized) return false;
+        return urlHostNormalized === patternHostNormalized;
+      }
+      case "exact_url": {
+        return url === pattern;
+      }
+      case "host_path_prefix": {
+        const urlHostNormalized = normalizeLeadingWww(hostname);
+        const urlPath = urlObj.pathname;
+        let patternHost = "";
+        let patternPath = "";
+        if (pattern.includes("://")) {
+          const patternUrl = new URL(pattern);
+          patternHost = patternUrl.hostname;
+          patternPath = patternUrl.pathname;
+        } else {
+          const firstSlashIdx = pattern.indexOf("/");
+          if (firstSlashIdx === -1) {
+            return false;
+          }
+          patternHost = pattern.slice(0, firstSlashIdx);
+          patternPath = pattern.slice(firstSlashIdx);
+        }
+        const patternHostNormalized = normalizeLeadingWww(patternHost);
+        if (!patternHostNormalized || urlHostNormalized !== patternHostNormalized) {
+          return false;
+        }
+        if (!patternPath.startsWith("/")) {
+          patternPath = "/" + patternPath;
+        }
+        if (urlPath.startsWith(patternPath)) {
+          return true;
+        }
+        if (patternPath.endsWith("/")) {
+          const withoutTrailingSlash = patternPath.slice(0, -1);
+          return urlPath === withoutTrailingSlash;
+        }
+        return false;
+      }
+      case "regex": {
+        try {
+          return new RegExp(pattern).test(url);
+        } catch (regexError) {
+          console.error("[list-utilities] Invalid regex pattern:", pattern, regexError);
+          return false;
+        }
+      }
+      default:
+        console.warn("[list-utilities] Unknown pattern type:", patternType);
+        return false;
+    }
+  } catch (error) {
+    console.error("[list-utilities] Error matching pattern:", error);
+    return false;
+  }
+}
+
+// src/loading.mts
+var LISTS_HASH_STORAGE_KEY = "rexListsLastSyncedHash";
+var ATTEMPTED_LISTS_HASH_STORAGE_KEY = "rexListsLastAttemptedHash";
+async function hashListsConfig(listsConfig) {
+  const sorted = {};
+  for (const key of Object.keys(listsConfig).sort()) {
+    sorted[key] = listsConfig[key];
+  }
+  const encoded = new TextEncoder().encode(JSON.stringify(sorted));
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function getLastSyncedListsHash() {
+  try {
+    const result = await chrome.storage.local.get(LISTS_HASH_STORAGE_KEY);
+    const value = result[LISTS_HASH_STORAGE_KEY];
+    return typeof value === "string" ? value : void 0;
+  } catch {
+    return void 0;
+  }
+}
+async function setLastSyncedListsHash(hash) {
+  await chrome.storage.local.set({ [LISTS_HASH_STORAGE_KEY]: hash });
+}
+function sortedKeys(key, value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return value;
+  }
+  const original = value;
+  const sorted = {};
+  for (const name of Object.keys(original).sort()) {
+    sorted[name] = original[name];
+  }
+  return sorted;
+}
+async function hashListsSection(lists) {
+  const encoded = new TextEncoder().encode(JSON.stringify(lists, sortedKeys));
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function recordAttemptedLists(listsConfig) {
+  const hash = await hashListsSection(listsConfig);
+  await chrome.storage.local.set({ [ATTEMPTED_LISTS_HASH_STORAGE_KEY]: hash });
+}
+async function clearLastSyncedListsHash() {
+  await chrome.storage.local.remove(LISTS_HASH_STORAGE_KEY);
+}
+async function clearAttemptedListsHash() {
+  await chrome.storage.local.remove(ATTEMPTED_LISTS_HASH_STORAGE_KEY);
+}
+async function syncListsFromConfig(configUrl) {
+  const errors = [];
+  const listsUpdated = [];
+  try {
+    console.log("[list-utilities] Fetching configuration from:", configUrl);
+    const response = await fetch(configUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch configuration: ${response.status} ${response.statusText}`);
+    }
+    const config = await response.json();
+    if (config.lists && typeof config.lists === "object") {
+      console.log("[list-utilities] Found lists in configuration:", Object.keys(config.lists));
+      await parseAndSyncLists(config.lists);
+      listsUpdated.push(...Object.keys(config.lists));
+    } else {
+      console.warn("[list-utilities] No lists section found in configuration");
+    }
+    return {
+      success: true,
+      listsUpdated
+    };
+  } catch (error) {
+    const errorMessage = error instanceof Error ? error.message : "Unknown error";
+    console.error("[list-utilities] Sync failed:", errorMessage);
+    errors.push(errorMessage);
+    return {
+      success: false,
+      listsUpdated,
+      errors
+    };
+  }
+}
+async function parseAndSyncLists(listsConfig, options) {
+  try {
+    await syncListsUnlessUnchanged(listsConfig, options);
+  } finally {
+    await recordAttemptedLists(listsConfig);
+  }
+}
+async function syncListsUnlessUnchanged(listsConfig, options) {
+  if (!options?.force) {
+    const newHash2 = await hashListsConfig(listsConfig);
+    const storedHash = await getLastSyncedListsHash();
+    if (storedHash !== void 0 && storedHash === newHash2) {
+      console.log("[list-utilities] Lists config unchanged, skipping sync");
+      return;
+    }
+  }
+  const listNames = Object.keys(listsConfig);
+  console.log(`[list-utilities] Syncing ${listNames.length} lists`);
+  let anyError = false;
+  const newHash = await hashListsConfig(listsConfig);
+  for (const listName of listNames) {
+    const entries = listsConfig[listName];
+    if (!Array.isArray(entries)) {
+      console.warn(`[list-utilities] Invalid entries for list ${listName}, skipping`);
+      continue;
+    }
+    try {
+      await mergeBackendList(listName, entries);
+      console.log(`[list-utilities] Synced list: ${listName} (${entries.length} entries)`);
+    } catch (error) {
+      anyError = true;
+      console.error(`[list-utilities] Failed to sync list ${listName}:`, error);
+    }
+  }
+  if (!anyError) {
+    await setLastSyncedListsHash(newHash);
+  }
+}
+async function mergeBackendList(listName, entries) {
+  console.log(`[list-utilities] Merging backend list: ${listName}`);
+  const newEntries = [];
+  for (const entry of entries) {
+    const pattern = entry?.pattern ?? entry?.domain;
+    const patternType = entry?.pattern_type;
+    if (typeof pattern !== "string" || pattern.length === 0 || !patternType) {
+      console.warn(`[list-utilities] Skipping invalid backend list entry (missing pattern/pattern_type) for ${listName}:`, entry);
+      continue;
+    }
+    if (patternType === "domain" && !isStrictRegisteredDomain(pattern)) {
+      console.error(
+        `[list-utilities] Invalid backend 'domain' pattern "${pattern}" in list "${listName}". This would be misleading/broad. Use a registered domain like "google.com", or pattern_type "host"/"regex" for subdomains. Skipping entry.`
+      );
+      continue;
+    }
+    newEntries.push({
+      list_name: listName,
+      pattern,
+      pattern_type: patternType,
+      source: "backend",
+      metadata: {
+        ...entry?.metadata ?? {},
+        sync_timestamp: Date.now()
+      }
+    });
+  }
+  try {
+    await replaceBackendEntries(listName, newEntries);
+    console.log(`[list-utilities] Replaced backend entries for ${listName} (${newEntries.length} entries)`);
+  } catch (error) {
+    console.error(`[list-utilities] Failed to replace backend entries for ${listName}:`, error);
+    throw error;
+  }
+}
+
+// src/storage.mts
 var DB_NAME = "webmunk_lists";
 var DB_VERSION = 4;
 var STORE_NAME = "list_entries";
@@ -10142,6 +10439,21 @@ async function getListEntries(listName) {
     };
     request.onerror = () => {
       reject(new Error(`Failed to get list entries: ${request.error?.message}`));
+    };
+  });
+}
+async function hasListEntries(listName) {
+  const db = await getDatabase();
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readonly");
+    const store = transaction.objectStore(STORE_NAME);
+    const index = store.index("list_name");
+    const request = index.count(listName);
+    request.onsuccess = () => {
+      resolve(request.result > 0);
+    };
+    request.onerror = () => {
+      reject(new Error(`Failed to count list entries: ${request.error?.message}`));
     };
   });
 }
@@ -10287,7 +10599,7 @@ async function resetListDatabase() {
     const request = indexedDB.deleteDatabase(DB_NAME);
     request.onsuccess = () => {
       console.log("[list-utilities] Database reset complete");
-      resolve();
+      Promise.all([clearLastSyncedListsHash(), clearAttemptedListsHash()]).then(() => resolve(), () => resolve());
     };
     request.onerror = () => {
       reject(new Error(`Failed to reset database: ${request.error?.message}`));
@@ -10327,19 +10639,6 @@ async function findListEntryByPattern(listName, patternType, pattern) {
       reject(new Error(`Failed to find entry: ${request.error?.message}`));
     };
   });
-}
-async function matchDomainAgainstList(url, listName) {
-  const entries = await getListEntries(listName);
-  if (debugEnabled) {
-    console.log(`[rex-lists] matchDomainAgainstList`);
-    console.log(entries);
-  }
-  for (const entry of entries) {
-    if (matchesPattern(url, entry.pattern, entry.pattern_type)) {
-      return entry;
-    }
-  }
-  return null;
 }
 async function bulkCreateListEntries(entries) {
   const db = await getDatabase();
@@ -10412,6 +10711,64 @@ async function bulkCreateListEntries(entries) {
     }
   });
 }
+async function replaceBackendEntries(listName, entries) {
+  const db = await getDatabase();
+  const now = Date.now();
+  const incoming = withoutDuplicatePatterns(entries);
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    transaction.oncomplete = () => {
+      resolve();
+    };
+    transaction.onerror = () => {
+      reject(new Error(`Failed to replace backend entries (tx): ${transaction.error?.message}`));
+    };
+    transaction.onabort = () => {
+      reject(new Error(`Replacing backend entries was aborted: ${transaction.error?.message}`));
+    };
+    const backendCursor = store.index("list_name_source").openCursor(IDBKeyRange.only([listName, "backend"]));
+    backendCursor.onsuccess = () => {
+      const cursor = backendCursor.result;
+      if (cursor) {
+        cursor.delete();
+        cursor.continue();
+        return;
+      }
+      const patternIndex = store.index("list_name_pattern_type_pattern");
+      incoming.forEach((entry) => {
+        const existingRequest = patternIndex.getKey([listName, entry.pattern_type, entry.pattern]);
+        existingRequest.onsuccess = () => {
+          if (existingRequest.result !== void 0) {
+            store.delete(existingRequest.result);
+          }
+          store.add({
+            ...entry,
+            metadata: {
+              ...entry.metadata,
+              created_at: entry.metadata.created_at || now,
+              updated_at: now
+            }
+          });
+        };
+      });
+    };
+  });
+}
+function withoutDuplicatePatterns(entries) {
+  const seen = /* @__PURE__ */ new Set();
+  const unique = [];
+  for (const entry of entries) {
+    const key = `${entry.pattern_type}:${entry.pattern}`;
+    if (seen.has(key)) {
+      console.warn(`[list-utilities] Skipping duplicate entry in replacement (${entry.list_name}:${key})`);
+      continue;
+    }
+    seen.add(key);
+    unique.push(entry);
+  }
+  return unique;
+}
 async function bulkDeleteListEntries(ids) {
   if (ids.length === 0) {
     return Promise.resolve();
@@ -10471,211 +10828,6 @@ async function importList(listName, jsonData) {
     throw new Error("Failed to import list: Unknown error");
   }
 }
-async function syncListsFromConfig(configUrl) {
-  const errors = [];
-  const listsUpdated = [];
-  try {
-    console.log("[list-utilities] Fetching configuration from:", configUrl);
-    const response = await fetch(configUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch configuration: ${response.status} ${response.statusText}`);
-    }
-    const config = await response.json();
-    if (config.lists && typeof config.lists === "object") {
-      console.log("[list-utilities] Found lists in configuration:", Object.keys(config.lists));
-      await parseAndSyncLists(config.lists);
-      listsUpdated.push(...Object.keys(config.lists));
-    } else {
-      console.warn("[list-utilities] No lists section found in configuration");
-    }
-    return {
-      success: true,
-      listsUpdated
-    };
-  } catch (error) {
-    const errorMessage = error instanceof Error ? error.message : "Unknown error";
-    console.error("[list-utilities] Sync failed:", errorMessage);
-    errors.push(errorMessage);
-    return {
-      success: false,
-      listsUpdated,
-      errors
-    };
-  }
-}
-async function parseAndSyncLists(listsConfig) {
-  const listNames = Object.keys(listsConfig);
-  console.log(`[list-utilities] Syncing ${listNames.length} lists`);
-  for (const listName of listNames) {
-    const entries = listsConfig[listName];
-    if (!Array.isArray(entries)) {
-      console.warn(`[list-utilities] Invalid entries for list ${listName}, skipping`);
-      continue;
-    }
-    try {
-      await mergeBackendList(listName, entries);
-      console.log(`[list-utilities] Synced list: ${listName} (${entries.length} entries)`);
-    } catch (error) {
-      console.error(`[list-utilities] Failed to sync list ${listName}:`, error);
-    }
-  }
-}
-async function mergeBackendList(listName, entries) {
-  console.log(`[list-utilities] Merging backend list: ${listName}`);
-  try {
-    await deleteAllEntriesInList(listName, "backend");
-    console.log(`[list-utilities] Cleared existing backend entries for: ${listName}`);
-  } catch (error) {
-    console.error(`[list-utilities] Failed to clear backend entries for ${listName}:`, error);
-    throw error;
-  }
-  const entriesToDelete = [];
-  for (const entry of entries) {
-    try {
-      const pattern = entry?.pattern ?? entry?.domain;
-      const patternType = entry?.pattern_type;
-      if (typeof pattern !== "string" || pattern.length === 0) continue;
-      if (!patternType) continue;
-      const existing = await findListEntryByPattern(listName, patternType, pattern);
-      if (existing?.id !== void 0) {
-        entriesToDelete.push(existing.id);
-        console.log(
-          `[list-utilities] Found conflicting entry for ${listName}:${patternType}:${pattern} (source=${existing.source ?? "unknown"}) - will delete`
-        );
-      }
-    } catch (error) {
-      console.error(`[list-utilities] Failed checking conflict for list ${listName}:`, error);
-    }
-  }
-  if (entriesToDelete.length > 0) {
-    try {
-      await bulkDeleteListEntries(entriesToDelete);
-      console.log(`[list-utilities] Deleted ${entriesToDelete.length} conflicting entries for ${listName}`);
-    } catch (error) {
-      console.error(`[list-utilities] Failed to delete conflicting entries:`, error);
-      throw new Error(`Failed to clear conflicts before sync: ${error instanceof Error ? error.message : "unknown"}`);
-    }
-  }
-  const newEntries = [];
-  for (const entry of entries) {
-    const pattern = entry?.pattern ?? entry?.domain;
-    const patternType = entry?.pattern_type;
-    if (typeof pattern !== "string" || pattern.length === 0 || !patternType) {
-      console.warn(`[list-utilities] Skipping invalid backend list entry (missing pattern/pattern_type) for ${listName}:`, entry);
-      continue;
-    }
-    if (patternType === "domain" && !isStrictRegisteredDomain(pattern)) {
-      console.error(
-        `[list-utilities] Invalid backend 'domain' pattern "${pattern}" in list "${listName}". This would be misleading/broad. Use a registered domain like "google.com", or pattern_type "host"/"regex" for subdomains. Skipping entry.`
-      );
-      continue;
-    }
-    newEntries.push({
-      list_name: listName,
-      pattern,
-      pattern_type: patternType,
-      source: "backend",
-      metadata: {
-        ...entry?.metadata ?? {},
-        sync_timestamp: Date.now()
-      }
-    });
-  }
-  if (newEntries.length > 0) {
-    await bulkCreateListEntries(newEntries);
-    console.log(`[list-utilities] Inserted ${newEntries.length} backend entries for: ${listName}`);
-  }
-}
-function matchesPattern(url, pattern, patternType) {
-  try {
-    const urlObj = new URL(url);
-    const hostname = urlObj.hostname;
-    if (debugEnabled) {
-      console.log(`[rex-lists] matchesPattern("${url}", "${pattern}", "${patternType}")`);
-    }
-    switch (patternType) {
-      case "domain": {
-        if (!isStrictRegisteredDomain(pattern)) {
-          console.warn(
-            `[list-utilities] Invalid 'domain' pattern "${pattern}". Use a registered domain like "google.com", or use pattern_type "host"/"regex" for subdomains.`
-          );
-          return false;
-        }
-        const urlParsed = na.parse(hostname);
-        if (urlParsed.error !== void 0) return false;
-        const urlDomain = urlParsed.domain;
-        if (!urlDomain) return false;
-        return urlDomain === normalizeLeadingWww(pattern.trim());
-      }
-      case "subdomain_wildcard":
-      // Server-side alias for 'host'. The server stores this pattern type as 'subdomain_wildcard'
-      // (a legacy name), but behavior is identical to 'host': exact hostname match, www-normalized.
-      // Falls through intentionally.
-      case "host": {
-        const urlHostNormalized = normalizeLeadingWww(hostname);
-        let patternHost = pattern;
-        if (pattern.includes("://")) {
-          patternHost = new URL(pattern).hostname;
-        } else if (pattern.includes("/")) {
-          patternHost = pattern.split("/")[0] ?? "";
-        }
-        const patternHostNormalized = normalizeLeadingWww(patternHost);
-        if (!patternHostNormalized) return false;
-        return urlHostNormalized === patternHostNormalized;
-      }
-      case "exact_url": {
-        return url === pattern;
-      }
-      case "host_path_prefix": {
-        const urlHostNormalized = normalizeLeadingWww(hostname);
-        const urlPath = urlObj.pathname;
-        let patternHost = "";
-        let patternPath = "";
-        if (pattern.includes("://")) {
-          const patternUrl = new URL(pattern);
-          patternHost = patternUrl.hostname;
-          patternPath = patternUrl.pathname;
-        } else {
-          const firstSlashIdx = pattern.indexOf("/");
-          if (firstSlashIdx === -1) {
-            return false;
-          }
-          patternHost = pattern.slice(0, firstSlashIdx);
-          patternPath = pattern.slice(firstSlashIdx);
-        }
-        const patternHostNormalized = normalizeLeadingWww(patternHost);
-        if (!patternHostNormalized || urlHostNormalized !== patternHostNormalized) {
-          return false;
-        }
-        if (!patternPath.startsWith("/")) {
-          patternPath = "/" + patternPath;
-        }
-        if (urlPath.startsWith(patternPath)) {
-          return true;
-        }
-        if (patternPath.endsWith("/")) {
-          const withoutTrailingSlash = patternPath.slice(0, -1);
-          return urlPath === withoutTrailingSlash;
-        }
-        return false;
-      }
-      case "regex": {
-        try {
-          return new RegExp(pattern).test(url);
-        } catch (regexError) {
-          console.error("[list-utilities] Invalid regex pattern:", pattern, regexError);
-          return false;
-        }
-      }
-      default:
-        console.warn("[list-utilities] Unknown pattern type:", patternType);
-        return false;
-    }
-  } catch (error) {
-    console.error("[list-utilities] Error matching pattern:", error);
-    return false;
-  }
-}
 export {
   bulkCreateListEntries,
   bulkDeleteListEntries,
@@ -10688,12 +10840,16 @@ export {
   getAllLists,
   getListEntries,
   getListEntriesBySource,
+  hasListEntries,
   importList,
   initializeListDatabase,
+  isStrictRegisteredDomain,
   matchDomainAgainstList,
   matchesPattern,
   mergeBackendList,
   parseAndSyncLists,
+  registeredDomainOf,
+  replaceBackendEntries,
   resetListDatabase,
   setDebug,
   syncListsFromConfig,

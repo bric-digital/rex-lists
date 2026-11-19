@@ -140,3 +140,5 @@ vite.config.ts.timestamp-*
 
 playwright-report/
 test-results/
+
+tests/extension/service-worker.bundle.js*

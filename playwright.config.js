@@ -38,7 +38,12 @@ export default defineConfig({
   projects: [
     {
       name: 'chromium',
+      testIgnore: 'service-worker.spec.ts',
       use: { ...devices['Desktop Chrome'] },
+    },
+    {
+      name: 'extension',
+      testMatch: 'service-worker.spec.ts',
     },
     // Uncomment to test in other browsers
     // {
