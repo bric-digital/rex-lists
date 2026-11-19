@@ -32,6 +32,12 @@ async function setLastSyncedListsHash(hash: string): Promise<void> {
   await chrome.storage.local.set({ [LISTS_HASH_STORAGE_KEY]: hash })
 }
 
+export async function listsLoaded(): Promise<boolean> {
+  const hash = await getLastSyncedListsHash()
+
+  return hash !== undefined
+}
+
 export async function clearLastSyncedListsHash(): Promise<void> {
   await chrome.storage.local.remove(LISTS_HASH_STORAGE_KEY)
 }

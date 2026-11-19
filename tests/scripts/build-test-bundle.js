@@ -15,7 +15,20 @@ const __dirname = dirname(__filename)
 const inputFile = join(__dirname, '../../src/list-utilities.mts')
 const outputFile = join(__dirname, '../src/build/list-utilities.bundle.js')
 
+const extensionEntry = join(__dirname, '../extension/sw-entry.mts')
+const extensionOutput = join(__dirname, '../extension/service-worker.bundle.js')
+
 try {
+  await esbuild.build({
+    entryPoints: [extensionEntry],
+    bundle: true,
+    format: 'esm',
+    platform: 'browser',
+    target: 'es2021',
+    outfile: extensionOutput,
+    sourcemap: true
+  })
+
   await esbuild.build({
     entryPoints: [inputFile],
     bundle: true,
@@ -26,9 +39,9 @@ try {
     sourcemap: true
   })
 
-  console.log('✅ Bundle created successfully:', outputFile)
+  console.log('Bundle created successfully:', outputFile)
   console.log('   You can now run: npm test')
 } catch (error) {
-  console.error('❌ Build failed:', error)
+  console.error('Build failed:', error)
   process.exit(1)
 }

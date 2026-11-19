@@ -10028,6 +10028,31 @@ function isStrictRegisteredDomain(pattern) {
   if (!domain) return false;
   return candidate === domain;
 }
+function isIpAddress(hostname) {
+  const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname);
+  const isIpv6 = hostname.startsWith("[");
+  return isIpv4 || isIpv6;
+}
+function registeredDomainOf(url) {
+  let hostname;
+  try {
+    hostname = new URL(url).hostname;
+  } catch {
+    return "";
+  }
+  if (isIpAddress(hostname)) {
+    return "";
+  }
+  const parsed = na.parse(hostname);
+  if (parsed.error !== void 0) {
+    return "";
+  }
+  const domain = parsed.domain;
+  if (domain === null || domain === void 0) {
+    return "";
+  }
+  return domain;
+}
 async function matchDomainAgainstList(url, listName) {
   const entries = await getListEntries(listName);
   if (debugEnabled) {
@@ -10165,6 +10190,10 @@ async function getLastSyncedListsHash() {
 }
 async function setLastSyncedListsHash(hash) {
   await chrome.storage.local.set({ [LISTS_HASH_STORAGE_KEY]: hash });
+}
+async function listsLoaded() {
+  const hash = await getLastSyncedListsHash();
+  return hash !== void 0;
 }
 async function clearLastSyncedListsHash() {
   await chrome.storage.local.remove(LISTS_HASH_STORAGE_KEY);
@@ -10789,10 +10818,12 @@ export {
   importList,
   initializeListDatabase,
   isStrictRegisteredDomain,
+  listsLoaded,
   matchDomainAgainstList,
   matchesPattern,
   mergeBackendList,
   parseAndSyncLists,
+  registeredDomainOf,
   replaceBackendEntries,
   resetListDatabase,
   setDebug,

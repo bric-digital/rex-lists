@@ -20,7 +20,8 @@
         "url": "git+https://github.com/bric-digital/rex-lists.git"
     },
     "exports": {
-        ".": "./src/list-utilities.mts"
+        ".": "./src/list-utilities.mts",
+        "./service-worker": "./src/service-worker.mts"
     },
     "scripts": {
         "build": "tsc",

@@ -46,6 +46,41 @@ export function isStrictRegisteredDomain(pattern: string): boolean {
   return candidate === domain
 }
 
+function isIpAddress(hostname: string): boolean {
+  const isIpv4 = /^\d{1,3}(\.\d{1,3}){3}$/.test(hostname)
+  const isIpv6 = hostname.startsWith('[')
+
+  return isIpv4 || isIpv6
+}
+
+export function registeredDomainOf(url: string): string {
+  let hostname: string
+
+  try {
+    hostname = new URL(url).hostname
+  } catch {
+    return ''
+  }
+
+  if (isIpAddress(hostname)) {
+    return ''
+  }
+
+  const parsed = psl.parse(hostname)
+
+  if (parsed.error !== undefined) {
+    return ''
+  }
+
+  const domain = (parsed as psl.ParsedDomain).domain
+
+  if (domain === null || domain === undefined) {
+    return ''
+  }
+
+  return domain
+}
+
 /**
  * Match a URL against all entries in a list
  * Returns the first matching entry, or null if no match

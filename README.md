@@ -13,6 +13,10 @@ Core list storage and URL matching utilities for REX browser extensions.
 
 This module is the storage/matching layer. For the UI and sync functionality, see [rex-lists-front-end](https://github.com/bric-digital/rex-lists-front-end).
 
+## Loading lists
+
+An extension imports `@bric/rex-lists/service-worker` in its service-worker entry file. That module reads the `lists` section of the configuration and stores it, on setup and whenever rex-core refreshes configuration. `lists_config.debug` turns on matching logs. `listsLoaded()` resolves true once a sync has completed without error. `registeredDomainOf(url)` returns a URL's registered domain, or an empty string. Redaction is not part of this module.
+
 ## Configuration
 
 This module reads from the `lists` section of the backend config.
