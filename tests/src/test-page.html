@@ -175,7 +175,7 @@
 
         // Helpers for hash-skip tests
         window.clearSyncHash = async function() {
-            await chrome.storage.local.remove(['rexListsLastSyncedHash', 'rexListsSyncInProgress', 'rexListsSyncAttemptFinished']);
+            await chrome.storage.local.remove('rexListsLastSyncedHash');
         };
         window.getStoredSyncHash = async function() {
             const result = await chrome.storage.local.get('rexListsLastSyncedHash');

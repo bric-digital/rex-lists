@@ -1,7 +1,21 @@
 // @ts-nocheck
-import { expect, extensionServiceWorker, injectConfiguration, launchExtension, newUserDataDir, test } from '../utils/extension'
+import { expect, injectConfiguration, test } from '../utils/extension'
 
 const newsList = [{ pattern: 'example.com', pattern_type: 'domain' }]
+
+function manyEntries(count) {
+  const entries = []
+
+  for (let index = 0; index < count; index += 1) {
+    entries.push({ pattern: `site${index}.com`, pattern_type: 'domain' })
+  }
+
+  return entries
+}
+
+async function holdConfigurationWithoutRefresh(serviceWorker, configuration) {
+  await serviceWorker.evaluate((value) => chrome.storage.local.set({ REXConfiguration: value }), configuration)
+}
 
 test('lists in configuration are loaded by the module', async ({ serviceWorker }) => {
   expect(await serviceWorker.evaluate(() => self.listsLoaded())).toBe(false)
@@ -22,40 +36,78 @@ test('lists count as loaded after an attempt with an invalid list', async ({ ser
   expect(await serviceWorker.evaluate(() => self.hasListEntries('news'))).toBe(true)
 })
 
-test('lists do not count as loaded while a sync is marked in progress', async ({ serviceWorker }) => {
-  await injectConfiguration(serviceWorker, { lists: { news: newsList } })
-  await expect.poll(() => serviceWorker.evaluate(() => self.listsLoaded())).toBe(true)
-  await serviceWorker.evaluate(() => chrome.storage.local.set({ rexListsSyncInProgress: true }))
+test('lists count as loaded after an attempt in which one list failed to store', async ({ serviceWorker }) => {
+  const lists = {
+    news: newsList,
+    failing: [{ pattern: 'other.com', pattern_type: 'domain', metadata: {} }],
+  }
+
+  await holdConfigurationWithoutRefresh(serviceWorker, { lists })
   expect(await serviceWorker.evaluate(() => self.listsLoaded())).toBe(false)
+
+  const result = await serviceWorker.evaluate(async (given) => {
+    const unstorable = { ...given, failing: [{ ...given.failing[0], metadata: { notStorable: () => true } }] }
+
+    await self.parseAndSyncLists(unstorable)
+
+    return {
+      loaded: await self.listsLoaded(),
+      news: await self.hasListEntries('news'),
+      failing: await self.hasListEntries('failing'),
+    }
+  }, lists)
+
+  expect(result).toEqual({ loaded: true, news: true, failing: false })
 })
 
-test('a sync marker left by a stopped worker is cleared when the module starts again', async () => {
-  const userDataDir = newUserDataDir()
-  const firstContext = await launchExtension(userDataDir)
-  const firstWorker = await extensionServiceWorker(firstContext)
+test('unchanged configuration stays loaded while the module starts again', async ({ serviceWorker }) => {
+  await injectConfiguration(serviceWorker, { lists: { news: newsList } })
+  await expect.poll(() => serviceWorker.evaluate(() => self.listsLoaded())).toBe(true)
 
-  await injectConfiguration(firstWorker, { lists: { news: newsList } })
-  await expect.poll(() => firstWorker.evaluate(() => self.listsLoaded())).toBe(true)
-  await firstWorker.evaluate(() => chrome.storage.local.set({ rexListsSyncInProgress: true }))
-  expect(await firstWorker.evaluate(() => self.listsLoaded())).toBe(false)
-  await firstContext.close()
+  const notLoadedReads = await serviceWorker.evaluate(async () => {
+    let finished = false
+    let notLoaded = 0
 
-  const secondContext = await launchExtension(userDataDir)
-  const secondWorker = await extensionServiceWorker(secondContext)
+    const started = Promise.resolve(self.listsModule.setup()).then(() => {
+      finished = true
+    })
 
-  await expect.poll(() => secondWorker.evaluate(() => self.listsLoaded())).toBe(true)
-  await secondContext.close()
+    while (finished === false) {
+      if (await self.listsLoaded() === false) {
+        notLoaded += 1
+      }
+    }
+
+    await started
+
+    if (await self.listsLoaded() === false) {
+      notLoaded += 1
+    }
+
+    return notLoaded
+  })
+
+  expect(notLoadedReads).toBe(0)
+})
+
+test('changed lists held by rex-core are not loaded until their sync finishes', async ({ serviceWorker }) => {
+  await injectConfiguration(serviceWorker, { lists: { news: newsList } })
+  await expect.poll(() => serviceWorker.evaluate(() => self.listsLoaded())).toBe(true)
+
+  await holdConfigurationWithoutRefresh(serviceWorker, { lists: { news: newsList, 'new-list': manyEntries(50) } })
+
+  expect(await serviceWorker.evaluate(() => self.listsLoaded())).toBe(false)
+  expect(await serviceWorker.evaluate(() => self.hasListEntries('new-list'))).toBe(false)
+
+  await serviceWorker.evaluate(() => self.listsModule.refreshConfiguration())
+
+  await expect.poll(() => serviceWorker.evaluate(() => self.listsLoaded())).toBe(true)
+  expect(await serviceWorker.evaluate(() => self.hasListEntries('new-list'))).toBe(true)
 })
 
 test('a reader never sees lists loaded while a newly named list is still empty', async ({ serviceWorker }) => {
   await injectConfiguration(serviceWorker, { lists: { news: newsList } })
   await expect.poll(() => serviceWorker.evaluate(() => self.listsLoaded())).toBe(true)
-
-  const newList = []
-
-  for (let index = 0; index < 500; index += 1) {
-    newList.push({ pattern: `site${index}.com`, pattern_type: 'domain' })
-  }
 
   const observed = await serviceWorker.evaluate(async (configuration) => {
     await self.sendRexMessage({ messageType: 'updateConfiguration', configuration })
@@ -76,7 +128,7 @@ test('a reader never sees lists loaded while a newly named list is still empty',
     }
 
     return { loadedWhileEmpty, settled: false }
-  }, { lists: { news: newsList, 'new-list': newList } })
+  }, { lists: { news: newsList, 'new-list': manyEntries(500) } })
 
   expect(observed).toEqual({ loadedWhileEmpty: 0, settled: true })
 })

@@ -7,8 +7,7 @@ import { isStrictRegisteredDomain } from './matching.mjs'
 // ============================================================================
 
 const LISTS_HASH_STORAGE_KEY = 'rexListsLastSyncedHash'
-const SYNC_IN_PROGRESS_STORAGE_KEY = 'rexListsSyncInProgress'
-const SYNC_ATTEMPT_FINISHED_STORAGE_KEY = 'rexListsSyncAttemptFinished'
+const ATTEMPTED_LISTS_HASH_STORAGE_KEY = 'rexListsLastAttemptedHash'
 
 async function hashListsConfig(listsConfig: Record<string, unknown>): Promise<string> {
   const sorted: Record<string, unknown> = {}
@@ -34,56 +33,51 @@ async function setLastSyncedListsHash(hash: string): Promise<void> {
   await chrome.storage.local.set({ [LISTS_HASH_STORAGE_KEY]: hash })
 }
 
-export async function listsLoaded(): Promise<boolean> {
-  try {
-    const result = await chrome.storage.local.get([SYNC_IN_PROGRESS_STORAGE_KEY, SYNC_ATTEMPT_FINISHED_STORAGE_KEY])
-
-    if (result[SYNC_IN_PROGRESS_STORAGE_KEY] === true) {
-      return false
-    }
-
-    return result[SYNC_ATTEMPT_FINISHED_STORAGE_KEY] === true
-  } catch {
-    return false
+function sortedKeys(key: string, value: unknown): unknown {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return value
   }
+
+  const original = value as Record<string, unknown>
+  const sorted: Record<string, unknown> = {}
+
+  for (const name of Object.keys(original).sort()) {
+    sorted[name] = original[name]
+  }
+
+  return sorted
+}
+
+export async function hashListsSection(lists: Record<string, unknown>): Promise<string> {
+  const encoded = new TextEncoder().encode(JSON.stringify(lists, sortedKeys))
+  const digest = await crypto.subtle.digest('SHA-256', encoded)
+
+  return Array.from(new Uint8Array(digest)).map(b => b.toString(16).padStart(2, '0')).join('')
+}
+
+export async function getAttemptedListsHash(): Promise<string | undefined> {
+  const result = await chrome.storage.local.get(ATTEMPTED_LISTS_HASH_STORAGE_KEY)
+  const value = result[ATTEMPTED_LISTS_HASH_STORAGE_KEY]
+
+  if (typeof value === 'string') {
+    return value
+  }
+
+  return undefined
+}
+
+export async function recordAttemptedLists(listsConfig: Record<string, unknown>): Promise<void> {
+  const hash = await hashListsSection(listsConfig)
+
+  await chrome.storage.local.set({ [ATTEMPTED_LISTS_HASH_STORAGE_KEY]: hash })
 }
 
 export async function clearLastSyncedListsHash(): Promise<void> {
   await chrome.storage.local.remove(LISTS_HASH_STORAGE_KEY)
 }
 
-// ============================================================================
-// List-sync progress
-// ============================================================================
-
-let syncsUnderway = 0
-
-export function beginListSync(): Promise<void> {
-  syncsUnderway += 1
-
-  return chrome.storage.local.set({ [SYNC_IN_PROGRESS_STORAGE_KEY]: true })
-}
-
-export async function endListSync(attemptFinished: boolean): Promise<void> {
-  syncsUnderway -= 1
-
-  if (attemptFinished === true) {
-    await chrome.storage.local.set({ [SYNC_ATTEMPT_FINISHED_STORAGE_KEY]: true })
-  }
-
-  if (syncsUnderway === 0) {
-    await chrome.storage.local.remove(SYNC_IN_PROGRESS_STORAGE_KEY)
-  }
-}
-
-export async function clearListSyncProgress(): Promise<void> {
-  await chrome.storage.local.remove([SYNC_IN_PROGRESS_STORAGE_KEY, SYNC_ATTEMPT_FINISHED_STORAGE_KEY])
-}
-
-export async function clearStaleListSync(): Promise<void> {
-  if (syncsUnderway === 0) {
-    await chrome.storage.local.remove(SYNC_IN_PROGRESS_STORAGE_KEY)
-  }
+export async function clearAttemptedListsHash(): Promise<void> {
+  await chrome.storage.local.remove(ATTEMPTED_LISTS_HASH_STORAGE_KEY)
 }
 
 // ============================================================================
@@ -146,10 +140,9 @@ export async function syncListsFromConfig(configUrl: string): Promise<SyncResult
  */
 export async function parseAndSyncLists(listsConfig: Record<string, any[]>, options?: { force?: boolean }): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
   try {
-    await beginListSync()
     await syncListsUnlessUnchanged(listsConfig, options)
   } finally {
-    await endListSync(true)
+    await recordAttemptedLists(listsConfig as Record<string, unknown>)
   }
 }
 

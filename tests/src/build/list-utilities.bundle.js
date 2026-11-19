@@ -10170,8 +10170,7 @@ function matchesPattern(url, pattern, patternType) {
 
 // src/loading.mts
 var LISTS_HASH_STORAGE_KEY = "rexListsLastSyncedHash";
-var SYNC_IN_PROGRESS_STORAGE_KEY = "rexListsSyncInProgress";
-var SYNC_ATTEMPT_FINISHED_STORAGE_KEY = "rexListsSyncAttemptFinished";
+var ATTEMPTED_LISTS_HASH_STORAGE_KEY = "rexListsLastAttemptedHash";
 async function hashListsConfig(listsConfig) {
   const sorted = {};
   for (const key of Object.keys(listsConfig).sort()) {
@@ -10193,41 +10192,39 @@ async function getLastSyncedListsHash() {
 async function setLastSyncedListsHash(hash) {
   await chrome.storage.local.set({ [LISTS_HASH_STORAGE_KEY]: hash });
 }
-async function listsLoaded() {
-  try {
-    const result = await chrome.storage.local.get([SYNC_IN_PROGRESS_STORAGE_KEY, SYNC_ATTEMPT_FINISHED_STORAGE_KEY]);
-    if (result[SYNC_IN_PROGRESS_STORAGE_KEY] === true) {
-      return false;
-    }
-    return result[SYNC_ATTEMPT_FINISHED_STORAGE_KEY] === true;
-  } catch {
-    return false;
+function sortedKeys(key, value) {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return value;
   }
+  const original = value;
+  const sorted = {};
+  for (const name of Object.keys(original).sort()) {
+    sorted[name] = original[name];
+  }
+  return sorted;
+}
+async function hashListsSection(lists) {
+  const encoded = new TextEncoder().encode(JSON.stringify(lists, sortedKeys));
+  const digest = await crypto.subtle.digest("SHA-256", encoded);
+  return Array.from(new Uint8Array(digest)).map((b) => b.toString(16).padStart(2, "0")).join("");
+}
+async function getAttemptedListsHash() {
+  const result = await chrome.storage.local.get(ATTEMPTED_LISTS_HASH_STORAGE_KEY);
+  const value = result[ATTEMPTED_LISTS_HASH_STORAGE_KEY];
+  if (typeof value === "string") {
+    return value;
+  }
+  return void 0;
+}
+async function recordAttemptedLists(listsConfig) {
+  const hash = await hashListsSection(listsConfig);
+  await chrome.storage.local.set({ [ATTEMPTED_LISTS_HASH_STORAGE_KEY]: hash });
 }
 async function clearLastSyncedListsHash() {
   await chrome.storage.local.remove(LISTS_HASH_STORAGE_KEY);
 }
-var syncsUnderway = 0;
-function beginListSync() {
-  syncsUnderway += 1;
-  return chrome.storage.local.set({ [SYNC_IN_PROGRESS_STORAGE_KEY]: true });
-}
-async function endListSync(attemptFinished) {
-  syncsUnderway -= 1;
-  if (attemptFinished === true) {
-    await chrome.storage.local.set({ [SYNC_ATTEMPT_FINISHED_STORAGE_KEY]: true });
-  }
-  if (syncsUnderway === 0) {
-    await chrome.storage.local.remove(SYNC_IN_PROGRESS_STORAGE_KEY);
-  }
-}
-async function clearListSyncProgress() {
-  await chrome.storage.local.remove([SYNC_IN_PROGRESS_STORAGE_KEY, SYNC_ATTEMPT_FINISHED_STORAGE_KEY]);
-}
-async function clearStaleListSync() {
-  if (syncsUnderway === 0) {
-    await chrome.storage.local.remove(SYNC_IN_PROGRESS_STORAGE_KEY);
-  }
+async function clearAttemptedListsHash() {
+  await chrome.storage.local.remove(ATTEMPTED_LISTS_HASH_STORAGE_KEY);
 }
 async function syncListsFromConfig(configUrl) {
   const errors = [];
@@ -10263,10 +10260,9 @@ async function syncListsFromConfig(configUrl) {
 }
 async function parseAndSyncLists(listsConfig, options) {
   try {
-    await beginListSync();
     await syncListsUnlessUnchanged(listsConfig, options);
   } finally {
-    await endListSync(true);
+    await recordAttemptedLists(listsConfig);
   }
 }
 async function syncListsUnlessUnchanged(listsConfig, options) {
@@ -10611,7 +10607,7 @@ async function resetListDatabase() {
     const request = indexedDB.deleteDatabase(DB_NAME);
     request.onsuccess = () => {
       console.log("[list-utilities] Database reset complete");
-      Promise.all([clearLastSyncedListsHash(), clearListSyncProgress()]).then(() => resolve(), () => resolve());
+      Promise.all([clearLastSyncedListsHash(), clearAttemptedListsHash()]).then(() => resolve(), () => resolve());
     };
     request.onerror = () => {
       reject(new Error(`Failed to reset database: ${request.error?.message}`));
@@ -10841,31 +10837,30 @@ async function importList(listName, jsonData) {
   }
 }
 export {
-  beginListSync,
   bulkCreateListEntries,
   bulkDeleteListEntries,
+  clearAttemptedListsHash,
   clearLastSyncedListsHash,
-  clearListSyncProgress,
-  clearStaleListSync,
   createListEntry,
   deleteAllEntriesInList,
   deleteListEntry,
-  endListSync,
   exportList,
   findListEntry,
   findListEntryByPattern,
   getAllLists,
+  getAttemptedListsHash,
   getListEntries,
   getListEntriesBySource,
   hasListEntries,
+  hashListsSection,
   importList,
   initializeListDatabase,
   isStrictRegisteredDomain,
-  listsLoaded,
   matchDomainAgainstList,
   matchesPattern,
   mergeBackendList,
   parseAndSyncLists,
+  recordAttemptedLists,
   registeredDomainOf,
   replaceBackendEntries,
   resetListDatabase,

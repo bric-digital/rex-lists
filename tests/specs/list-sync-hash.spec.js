@@ -124,6 +124,9 @@ test.describe('parseAndSyncLists - hash-based skip', () => {
     const hashAfterSync = await page.evaluate(() => window.getStoredSyncHash());
     expect(hashAfterSync).not.toBeNull();
 
+    const attemptedAfterSync = await page.evaluate(() => chrome.storage.local.get('rexListsLastAttemptedHash'));
+    expect(typeof attemptedAfterSync.rexListsLastAttemptedHash).toBe('string');
+
     // Navigate away to close all IDB connections, then back to run resetListDatabase cleanly
     await page.goto('about:blank');
     await page.goto('/test-page.html');
@@ -134,68 +137,8 @@ test.describe('parseAndSyncLists - hash-based skip', () => {
 
     const hashAfterReset = await page.evaluate(() => window.getStoredSyncHash());
     expect(hashAfterReset).toBeNull();
-  });
-});
 
-test.describe('listsLoaded', () => {
-  test.beforeEach(async ({ page }) => {
-    await page.goto('/test-page.html');
-    await page.waitForFunction(() => window.testUtilitiesReady === true);
-    await page.evaluate(() => window.clearDatabase());
-    await page.evaluate(() => window.clearSyncHash());
-  });
-
-  test('is false before any sync attempt', async ({ page }) => {
-    expect(await page.evaluate(() => window.ListUtilities.listsLoaded())).toBe(false);
-  });
-
-  test('is true after an attempt in which one list failed to store', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const config = {
-        'good-list': [{ pattern: 'example.com', pattern_type: 'domain' }],
-        'failing-list': [{ pattern: 'other.com', pattern_type: 'domain', metadata: { notStorable: () => true } }]
-      };
-
-      await window.ListUtilities.parseAndSyncLists(config);
-
-      return {
-        loaded: await window.ListUtilities.listsLoaded(),
-        goodEntries: (await window.ListUtilities.getListEntries('good-list')).length,
-        failingEntries: (await window.ListUtilities.getListEntries('failing-list')).length
-      };
-    });
-
-    expect(result).toEqual({ loaded: true, goodEntries: 1, failingEntries: 0 });
-  });
-
-  test('is true after an attempt skipped because the configuration is unchanged', async ({ page }) => {
-    const result = await page.evaluate(async () => {
-      const config = { 'test-list': [{ pattern: 'example.com', pattern_type: 'domain' }] };
-
-      await window.ListUtilities.parseAndSyncLists(config);
-      await chrome.storage.local.remove('rexListsSyncAttemptFinished');
-      await window.ListUtilities.parseAndSyncLists(config);
-
-      return window.ListUtilities.listsLoaded();
-    });
-
-    expect(result).toBe(true);
-  });
-
-  test('resetListDatabase clears the record of a finished attempt', async ({ page }) => {
-    await page.evaluate(async () => {
-      const config = { 'test-list': [{ pattern: 'example.com', pattern_type: 'domain' }] };
-      await window.ListUtilities.parseAndSyncLists(config);
-    });
-
-    expect(await page.evaluate(() => window.ListUtilities.listsLoaded())).toBe(true);
-
-    await page.goto('about:blank');
-    await page.goto('/test-page.html');
-    await page.waitForFunction(() => window.testUtilitiesReady === true);
-
-    await page.evaluate(() => window.ListUtilities.resetListDatabase());
-
-    await expect.poll(() => page.evaluate(() => window.ListUtilities.listsLoaded())).toBe(false);
+    const attemptedAfterReset = await page.evaluate(() => chrome.storage.local.get('rexListsLastAttemptedHash'));
+    expect(attemptedAfterReset).toEqual({});
   });
 });
