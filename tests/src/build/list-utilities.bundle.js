@@ -10234,40 +10234,6 @@ async function parseAndSyncLists(listsConfig, options) {
 }
 async function mergeBackendList(listName, entries) {
   console.log(`[list-utilities] Merging backend list: ${listName}`);
-  try {
-    await deleteAllEntriesInList(listName, "backend");
-    console.log(`[list-utilities] Cleared existing backend entries for: ${listName}`);
-  } catch (error) {
-    console.error(`[list-utilities] Failed to clear backend entries for ${listName}:`, error);
-    throw error;
-  }
-  const entriesToDelete = [];
-  for (const entry of entries) {
-    try {
-      const pattern = entry?.pattern ?? entry?.domain;
-      const patternType = entry?.pattern_type;
-      if (typeof pattern !== "string" || pattern.length === 0) continue;
-      if (!patternType) continue;
-      const existing = await findListEntryByPattern(listName, patternType, pattern);
-      if (existing?.id !== void 0) {
-        entriesToDelete.push(existing.id);
-        console.log(
-          `[list-utilities] Found conflicting entry for ${listName}:${patternType}:${pattern} (source=${existing.source ?? "unknown"}) - will delete`
-        );
-      }
-    } catch (error) {
-      console.error(`[list-utilities] Failed checking conflict for list ${listName}:`, error);
-    }
-  }
-  if (entriesToDelete.length > 0) {
-    try {
-      await bulkDeleteListEntries(entriesToDelete);
-      console.log(`[list-utilities] Deleted ${entriesToDelete.length} conflicting entries for ${listName}`);
-    } catch (error) {
-      console.error(`[list-utilities] Failed to delete conflicting entries:`, error);
-      throw new Error(`Failed to clear conflicts before sync: ${error instanceof Error ? error.message : "unknown"}`);
-    }
-  }
   const newEntries = [];
   for (const entry of entries) {
     const pattern = entry?.pattern ?? entry?.domain;
@@ -10293,9 +10259,12 @@ async function mergeBackendList(listName, entries) {
       }
     });
   }
-  if (newEntries.length > 0) {
-    await bulkCreateListEntries(newEntries);
-    console.log(`[list-utilities] Inserted ${newEntries.length} backend entries for: ${listName}`);
+  try {
+    await replaceBackendEntries(listName, newEntries);
+    console.log(`[list-utilities] Replaced backend entries for ${listName} (${newEntries.length} entries)`);
+  } catch (error) {
+    console.error(`[list-utilities] Failed to replace backend entries for ${listName}:`, error);
+    throw error;
   }
 }
 
@@ -10686,6 +10655,64 @@ async function bulkCreateListEntries(entries) {
     }
   });
 }
+async function replaceBackendEntries(listName, entries) {
+  const db = await getDatabase();
+  const now = Date.now();
+  const incoming = withoutDuplicatePatterns(entries);
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, "readwrite");
+    const store = transaction.objectStore(STORE_NAME);
+    transaction.oncomplete = () => {
+      resolve();
+    };
+    transaction.onerror = () => {
+      reject(new Error(`Failed to replace backend entries (tx): ${transaction.error?.message}`));
+    };
+    transaction.onabort = () => {
+      reject(new Error(`Replacing backend entries was aborted: ${transaction.error?.message}`));
+    };
+    const backendCursor = store.index("list_name_source").openCursor(IDBKeyRange.only([listName, "backend"]));
+    backendCursor.onsuccess = () => {
+      const cursor = backendCursor.result;
+      if (cursor) {
+        cursor.delete();
+        cursor.continue();
+        return;
+      }
+      const patternIndex = store.index("list_name_pattern_type_pattern");
+      incoming.forEach((entry) => {
+        const existingRequest = patternIndex.getKey([listName, entry.pattern_type, entry.pattern]);
+        existingRequest.onsuccess = () => {
+          if (existingRequest.result !== void 0) {
+            store.delete(existingRequest.result);
+          }
+          store.add({
+            ...entry,
+            metadata: {
+              ...entry.metadata,
+              created_at: entry.metadata.created_at || now,
+              updated_at: now
+            }
+          });
+        };
+      });
+    };
+  });
+}
+function withoutDuplicatePatterns(entries) {
+  const seen = /* @__PURE__ */ new Set();
+  const unique = [];
+  for (const entry of entries) {
+    const key = `${entry.pattern_type}:${entry.pattern}`;
+    if (seen.has(key)) {
+      console.warn(`[list-utilities] Skipping duplicate entry in replacement (${entry.list_name}:${key})`);
+      continue;
+    }
+    seen.add(key);
+    unique.push(entry);
+  }
+  return unique;
+}
 async function bulkDeleteListEntries(ids) {
   if (ids.length === 0) {
     return Promise.resolve();
@@ -10766,6 +10793,7 @@ export {
   matchesPattern,
   mergeBackendList,
   parseAndSyncLists,
+  replaceBackendEntries,
   resetListDatabase,
   setDebug,
   syncListsFromConfig,

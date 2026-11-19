@@ -1,4 +1,4 @@
-import { deleteAllEntriesInList, bulkCreateListEntries, bulkDeleteListEntries, findListEntryByPattern } from './storage.mjs'
+import { replaceBackendEntries } from './storage.mjs'
 import type { ListEntry, PatternType, SyncResult } from './storage.mjs'
 import { isStrictRegisteredDomain } from './matching.mjs'
 
@@ -144,60 +144,7 @@ export async function parseAndSyncLists(listsConfig: Record<string, any[]>, opti
 export async function mergeBackendList(listName: string, entries: any[]): Promise<void> { // eslint-disable-line @typescript-eslint/no-explicit-any
   console.log(`[list-utilities] Merging backend list: ${listName}`)
 
-  // 1. Delete all existing 'backend' entries for this list
-  try {
-    await deleteAllEntriesInList(listName, 'backend')
-    console.log(`[list-utilities] Cleared existing backend entries for: ${listName}`)
-  } catch (error) {
-    console.error(`[list-utilities] Failed to clear backend entries for ${listName}:`, error)
-    throw error
-  }
-
-  // 1b. Ensure uniqueness constraints won't fail when inserting backend entries.
-  //
-  // Our IndexedDB schema enforces a unique compound index on (list_name, pattern_type, pattern) across ALL sources.
-  // That means a user-created entry (or a previously imported/generated entry) with the same
-  // (pattern_type, pattern) would cause backend sync to fail with a uniqueness error.
-  //
-  // For backend-first sync, we resolve conflicts by removing any existing entry with the same
-  // (list_name, pattern_type, pattern) before inserting the backend-provided version.
-  //
-  // We batch these deletions to ensure they complete before bulk insert.
-  const entriesToDelete: number[] = []
-
-  for (const entry of entries) {
-    try {
-      const pattern = entry?.pattern ?? entry?.domain
-      const patternType = entry?.pattern_type as PatternType | undefined
-      if (typeof pattern !== 'string' || pattern.length === 0) continue
-      if (!patternType) continue
-
-      const existing = await findListEntryByPattern(listName, patternType, pattern)
-      if (existing?.id !== undefined) {
-        entriesToDelete.push(existing.id)
-        console.log(
-          `[list-utilities] Found conflicting entry for ${listName}:${patternType}:${pattern} ` +
-          `(source=${existing.source ?? 'unknown'}) - will delete`
-        )
-      }
-    } catch (error) {
-      console.error(`[list-utilities] Failed checking conflict for list ${listName}:`, error)
-    }
-  }
-
-  // Delete all conflicting entries in a single transaction for atomicity
-  if (entriesToDelete.length > 0) {
-    try {
-      await bulkDeleteListEntries(entriesToDelete)
-      console.log(`[list-utilities] Deleted ${entriesToDelete.length} conflicting entries for ${listName}`)
-    } catch (error) {
-      console.error(`[list-utilities] Failed to delete conflicting entries:`, error)
-      // eslint-disable-next-line preserve-caught-error -- Error cause: {} constructor arg is TS2022+ lib, not available in consumer toolchains yet
-      throw new Error(`Failed to clear conflicts before sync: ${error instanceof Error ? error.message : 'unknown'}`)
-    }
-  }
-
-  // 2. Prepare new backend entries (skip invalid ones, but log loudly)
+  // 1. Prepare new backend entries (skip invalid ones, but log loudly)
   const newEntries: Omit<ListEntry, 'id'>[] = []
 
   for (const entry of entries) {
@@ -229,11 +176,14 @@ export async function mergeBackendList(listName: string, entries: any[]): Promis
     })
   }
 
-  // 3. Insert new backend entries
-  if (newEntries.length > 0) {
-    await bulkCreateListEntries(newEntries)
-    console.log(`[list-utilities] Inserted ${newEntries.length} backend entries for: ${listName}`)
+  // 2. Replace the list's backend entries in one transaction
+  try {
+    await replaceBackendEntries(listName, newEntries)
+    console.log(`[list-utilities] Replaced backend entries for ${listName} (${newEntries.length} entries)`)
+  } catch (error) {
+    console.error(`[list-utilities] Failed to replace backend entries for ${listName}:`, error)
+    throw error
   }
 
-  // 4. User-added and generated entries are preserved automatically
+  // 3. User-added and generated entries with other patterns are preserved
 }

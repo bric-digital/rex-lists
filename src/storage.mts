@@ -622,6 +622,90 @@ export async function bulkCreateListEntries(entries: Omit<ListEntry, 'id'>[]): P
 }
 
 /**
+ * Replace a list's backend entries in a single transaction
+ * Deletes the list's existing backend entries, deletes entries of other sources
+ * that share a (pattern_type, pattern) with an incoming entry, then adds the
+ * incoming entries. Readers see the list either before or after the replacement.
+ */
+export async function replaceBackendEntries(
+  listName: string,
+  entries: Omit<ListEntry, 'id'>[]
+): Promise<void> {
+  const db = await getDatabase()
+  const now = Date.now()
+  const incoming = withoutDuplicatePatterns(entries)
+
+  return new Promise((resolve, reject) => {
+    const transaction = db.transaction(STORE_NAME, 'readwrite')
+    const store = transaction.objectStore(STORE_NAME)
+
+    transaction.oncomplete = () => {
+      resolve()
+    }
+
+    transaction.onerror = () => {
+      reject(new Error(`Failed to replace backend entries (tx): ${transaction.error?.message}`))
+    }
+
+    transaction.onabort = () => {
+      reject(new Error(`Replacing backend entries was aborted: ${transaction.error?.message}`))
+    }
+
+    const backendCursor = store.index('list_name_source').openCursor(IDBKeyRange.only([listName, 'backend']))
+
+    backendCursor.onsuccess = () => {
+      const cursor = backendCursor.result
+
+      if (cursor) {
+        cursor.delete()
+        cursor.continue()
+        return
+      }
+
+      const patternIndex = store.index('list_name_pattern_type_pattern')
+
+      incoming.forEach((entry) => {
+        const existingRequest = patternIndex.getKey([listName, entry.pattern_type, entry.pattern])
+
+        existingRequest.onsuccess = () => {
+          if (existingRequest.result !== undefined) {
+            store.delete(existingRequest.result)
+          }
+
+          store.add({
+            ...entry,
+            metadata: {
+              ...entry.metadata,
+              created_at: entry.metadata.created_at || now,
+              updated_at: now
+            }
+          })
+        }
+      })
+    }
+  })
+}
+
+function withoutDuplicatePatterns(entries: Omit<ListEntry, 'id'>[]): Omit<ListEntry, 'id'>[] {
+  const seen = new Set<string>()
+  const unique: Omit<ListEntry, 'id'>[] = []
+
+  for (const entry of entries) {
+    const key = `${entry.pattern_type}:${entry.pattern}`
+
+    if (seen.has(key)) {
+      console.warn(`[list-utilities] Skipping duplicate entry in replacement (${entry.list_name}:${key})`)
+      continue
+    }
+
+    seen.add(key)
+    unique.push(entry)
+  }
+
+  return unique
+}
+
+/**
  * Delete multiple list entries by ID in a single transaction
  * More efficient than deleting entries one at a time
  */
